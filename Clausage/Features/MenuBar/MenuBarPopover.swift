@@ -120,11 +120,8 @@ struct UsageSection: View {
                 }
             }
 
-            if let error = usageService.usage.error {
-                Text(error)
-                    .font(.system(size: 11))
-                    .foregroundColor(.red)
-            } else {
+            if usageService.usage.fiveHourPercent != nil || usageService.usage.weeklyPercent != nil {
+                // Show usage data (even if stale from rate limiting)
                 UsageRow(
                     label: "5-hour",
                     percent: usageService.usage.fiveHourPercent,
@@ -135,12 +132,21 @@ struct UsageSection: View {
                     percent: usageService.usage.weeklyPercent,
                     resetsAt: usageService.usage.weeklyResetsAt
                 )
+            } else if let error = usageService.usage.error {
+                Text(error)
+                    .font(.system(size: 11))
+                    .foregroundColor(.red)
             }
 
             if let lastUpdated = usageService.usage.lastUpdated {
-                Text("Updated \(timeAgo(lastUpdated))")
-                    .font(.system(size: 9))
-                    .foregroundColor(.secondary.opacity(0.7))
+                HStack(spacing: 4) {
+                    Text("Updated \(timeAgo(lastUpdated))")
+                    if usageService.usage.isStale {
+                        Text("(refreshing...)")
+                    }
+                }
+                .font(.system(size: 9))
+                .foregroundColor(.secondary.opacity(0.7))
             }
         }
     }

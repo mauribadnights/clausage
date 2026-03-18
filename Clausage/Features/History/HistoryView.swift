@@ -172,12 +172,16 @@ struct ChartCard: View {
 struct StatsSummary: View {
     let snapshots: [UsageSnapshot]
 
-    private var timesHitFiveHourLimit: Int {
-        snapshots.filter { $0.fiveHourPercent >= 95 }.count
+    private var pctAtFiveHourLimit: Double {
+        guard !snapshots.isEmpty else { return 0 }
+        let hits = snapshots.filter { $0.fiveHourPercent >= 95 }.count
+        return Double(hits) / Double(snapshots.count) * 100
     }
 
-    private var timesHitWeeklyLimit: Int {
-        snapshots.filter { $0.weeklyPercent >= 95 }.count
+    private var pctAtWeeklyLimit: Double {
+        guard !snapshots.isEmpty else { return 0 }
+        let hits = snapshots.filter { $0.weeklyPercent >= 95 }.count
+        return Double(hits) / Double(snapshots.count) * 100
     }
 
     private var avgFiveHour: Double {
@@ -194,8 +198,8 @@ struct StatsSummary: View {
         HStack(spacing: 16) {
             StatBox(title: "Avg 5-Hour", value: "\(Int(avgFiveHour))%", icon: "clock")
             StatBox(title: "Avg Weekly", value: "\(Int(avgWeekly))%", icon: "calendar")
-            StatBox(title: "Hit 5h Limit", value: "\(timesHitFiveHourLimit)x", icon: "exclamationmark.triangle")
-            StatBox(title: "Hit Weekly Limit", value: "\(timesHitWeeklyLimit)x", icon: "exclamationmark.triangle")
+            StatBox(title: "At 5h Limit", value: "\(Int(pctAtFiveHourLimit))%", icon: "exclamationmark.triangle")
+            StatBox(title: "At Weekly Limit", value: "\(Int(pctAtWeeklyLimit))%", icon: "exclamationmark.triangle")
         }
     }
 }

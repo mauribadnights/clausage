@@ -66,75 +66,87 @@ final class PlanPricingTests: XCTestCase {
         XCTAssertEqual(multipliers, multipliers.sorted(), "Usage multipliers should increase with price")
     }
 
-    // MARK: - Plan recommendation logic
+    // MARK: - Plan analysis
 
-    func testInsufficientDataRecommendation() {
+    func testInsufficientDataReturnsEmptyProjections() {
         let service = makeService()
         let snapshots = makeSnapshots(count: 5, fiveHour: 50, weekly: 50)
-        let result = service.analyzeUsage(snapshots: snapshots, currentPlanId: "pro")
+        let result = service.analyzePlans(snapshots: snapshots, currentPlanId: "pro")
         XCTAssertNotNil(result)
-        XCTAssertEqual(result?.recommendation, .insufficientData)
+        XCTAssertTrue(result!.projections.isEmpty)
+        XCTAssertTrue(result!.insight.contains("Need more"))
     }
 
-    func testUpgradeRecommendationWhenHittingLimits() {
+    func testAnalysisReturnsProjectionPerPlan() {
         let service = makeService()
-        // Snapshots where usage is consistently at the limit
+        let snapshots = makeSnapshots(count: 20, fiveHour: 50, weekly: 40)
+        let result = service.analyzePlans(snapshots: snapshots, currentPlanId: "pro")
+        XCTAssertNotNil(result)
+        XCTAssertEqual(result!.projections.count, 4, "Should have one projection per plan")
+    }
+
+    func testHigherPlanReducesProjectedUtilization() {
+        let service = makeService()
+        let snapshots = makeSnapshots(count: 20, fiveHour: 80, weekly: 60)
+        let result = service.analyzePlans(snapshots: snapshots, currentPlanId: "pro")!
+
+        let proProjAvg = result.projections.first(where: { $0.plan.id == "pro" })!.projectedAvg5h
+        let maxProjAvg = result.projections.first(where: { $0.plan.id == "max_5x" })!.projectedAvg5h
+
+        XCTAssertGreaterThan(proProjAvg, maxProjAvg, "Higher plan should have lower projected utilization")
+    }
+
+    func testLowerPlanIncreasesProjectedUtilization() {
+        let service = makeService()
+        let snapshots = makeSnapshots(count: 20, fiveHour: 50, weekly: 30)
+        let result = service.analyzePlans(snapshots: snapshots, currentPlanId: "pro")!
+
+        let proProjAvg = result.projections.first(where: { $0.plan.id == "pro" })!.projectedAvg5h
+        let freeProjAvg = result.projections.first(where: { $0.plan.id == "free" })!.projectedAvg5h
+
+        XCTAssertLessThan(proProjAvg, freeProjAvg, "Lower plan should have higher projected utilization")
+    }
+
+    func testHeavyUserShowsLimitHits() {
+        let service = makeService()
         let snapshots = makeSnapshots(count: 20, fiveHour: 97, weekly: 85)
-        let result = service.analyzeUsage(snapshots: snapshots, currentPlanId: "pro")
-        XCTAssertNotNil(result)
-        XCTAssertEqual(result?.recommendation, .upgrade)
+        let result = service.analyzePlans(snapshots: snapshots, currentPlanId: "pro")!
+
+        let proProj = result.projections.first(where: { $0.plan.id == "pro" })!
+        XCTAssertGreaterThan(proProj.pctTimeAt5hLimit, 0, "Heavy user should show time at limit")
     }
 
-    func testDowngradeRecommendationWhenBarelyUsing() {
-        let service = makeService()
-        // Snapshots where usage is very low
-        let snapshots = makeSnapshots(count: 20, fiveHour: 10, weekly: 8)
-        let result = service.analyzeUsage(snapshots: snapshots, currentPlanId: "pro")
-        XCTAssertNotNil(result)
-        XCTAssertEqual(result?.recommendation, .downgrade)
-    }
-
-    func testStayPutRecommendation() {
-        let service = makeService()
-        // Moderate usage — fits well
-        let snapshots = makeSnapshots(count: 20, fiveHour: 45, weekly: 40)
-        let result = service.analyzeUsage(snapshots: snapshots, currentPlanId: "pro")
-        XCTAssertNotNil(result)
-        XCTAssertEqual(result?.recommendation, .stayPut)
-    }
-
-    func testNoUpgradeFromHighestPlan() {
-        let service = makeService()
-        let snapshots = makeSnapshots(count: 20, fiveHour: 97, weekly: 85)
-        let result = service.analyzeUsage(snapshots: snapshots, currentPlanId: "max_20x")
-        XCTAssertNotNil(result)
-        // Highest plan can't upgrade — should stay put
-        XCTAssertEqual(result?.recommendation, .stayPut)
-    }
-
-    func testNoDowngradeFromFreePlan() {
+    func testLightUserHasHeadroom() {
         let service = makeService()
         let snapshots = makeSnapshots(count: 20, fiveHour: 10, weekly: 8)
-        let result = service.analyzeUsage(snapshots: snapshots, currentPlanId: "free")
-        XCTAssertNotNil(result)
-        // Free plan can't downgrade — should stay put
-        XCTAssertEqual(result?.recommendation, .stayPut)
+        let result = service.analyzePlans(snapshots: snapshots, currentPlanId: "pro")!
+
+        let proProj = result.projections.first(where: { $0.plan.id == "pro" })!
+        XCTAssertGreaterThan(proProj.headroom, 50, "Light user should have plenty of headroom")
+        XCTAssertEqual(proProj.pctTimeAt5hLimit, 0, "Light user should never hit limit")
     }
 
-    func testRecommendationIncludesStats() {
+    func testInsightContainsUsageInfo() {
+        let service = makeService()
+        let snapshots = makeSnapshots(count: 20, fiveHour: 60, weekly: 40)
+        let result = service.analyzePlans(snapshots: snapshots, currentPlanId: "pro")!
+        XCTAssertFalse(result.insight.isEmpty)
+        XCTAssertTrue(result.insight.contains("Pro"), "Insight should mention current plan")
+    }
+
+    func testUnknownPlanReturnsNil() {
         let service = makeService()
         let snapshots = makeSnapshots(count: 20, fiveHour: 50, weekly: 50)
-        let result = service.analyzeUsage(snapshots: snapshots, currentPlanId: "pro")
-        XCTAssertNotNil(result?.avgFiveHourUsage)
-        XCTAssertNotNil(result?.avgWeeklyUsage)
-        XCTAssertFalse(result?.reasoning.isEmpty ?? true)
-    }
-
-    func testRecommendationWithUnknownPlanReturnsNil() {
-        let service = makeService()
-        let snapshots = makeSnapshots(count: 20, fiveHour: 50, weekly: 50)
-        let result = service.analyzeUsage(snapshots: snapshots, currentPlanId: "nonexistent_plan")
+        let result = service.analyzePlans(snapshots: snapshots, currentPlanId: "nonexistent")
         XCTAssertNil(result)
+    }
+
+    func testProjectionsHaveUniqueIds() {
+        let service = makeService()
+        let snapshots = makeSnapshots(count: 20, fiveHour: 50, weekly: 50)
+        let result = service.analyzePlans(snapshots: snapshots, currentPlanId: "pro")!
+        let ids = result.projections.map(\.id)
+        XCTAssertEqual(Set(ids).count, ids.count, "Projection IDs should be unique")
     }
 
     // MARK: - Helpers

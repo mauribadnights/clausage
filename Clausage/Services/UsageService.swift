@@ -8,6 +8,8 @@ struct UsageData: Equatable {
     var weeklyResetsAt: Date?
     var lastUpdated: Date?
     var error: String?
+    /// True when showing cached data after a transient API failure
+    var isStale: Bool = false
 
     static func == (lhs: UsageData, rhs: UsageData) -> Bool {
         lhs.fiveHourPercent == rhs.fiveHourPercent
@@ -26,6 +28,7 @@ final class UsageService {
     private var consecutiveFailures = 0
     private var lastSuccessfulUsage: UsageData?
     private var modelContainer: ModelContainer?
+    private var retryTask: Task<Void, Never>?
 
     init() {
         startRefreshTimer()
@@ -54,6 +57,9 @@ final class UsageService {
     @MainActor
     func fetch() {
         isLoading = true
+        // Cancel any pending retry to avoid compounding fetches
+        retryTask?.cancel()
+        retryTask = nil
 
         Task.detached(priority: .utility) {
             let result = Self.fetchUsage()
@@ -63,15 +69,26 @@ final class UsageService {
 
                 if result.error != nil {
                     self.consecutiveFailures += 1
-                    if let lastGood = self.lastSuccessfulUsage, self.consecutiveFailures <= 5 {
-                        self.usage = lastGood
+
+                    if let lastGood = self.lastSuccessfulUsage {
+                        // Keep showing last good data, mark as stale
+                        var stale = lastGood
+                        stale.isStale = true
+                        self.usage = stale
                     } else {
-                        self.usage = result
+                        // No cached data at all — show a helpful message
+                        if result.error == "Rate limited" {
+                            self.usage = UsageData(error: "Waiting for API... (rate limited, retrying)")
+                        } else {
+                            self.usage = result
+                        }
                     }
 
+                    // Schedule a single retry with backoff
                     let delay = min(15.0 * pow(2.0, Double(self.consecutiveFailures - 1)), 120.0)
-                    Task { [weak self] in
+                    self.retryTask = Task { [weak self] in
                         try? await Task.sleep(for: .seconds(delay))
+                        guard !Task.isCancelled else { return }
                         await self?.fetch()
                     }
                 } else {
