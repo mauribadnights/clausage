@@ -31,7 +31,7 @@ struct DashboardView: View {
                 }
 
                 // Promo status card
-                if AppSettings.shared.showPromoTimer && appState.status != .ended {
+                if AppSettings.shared.showPromoTimer && appState.status != .ended && appState.status != .disabled {
                     PromoCard(appState: appState)
                 }
 
@@ -152,7 +152,7 @@ struct PromoCard: View {
                         .foregroundColor(.secondary)
                 }
 
-                Text("Peak: Weekdays \(PromoSchedule.peakHoursLocalString())")
+                Text("Peak: Weekdays \(PromoSchedule.shared.peakHoursLocalString())")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -176,7 +176,7 @@ struct PromoCard: View {
         case .active2x: return .green
         case .peak1x: return .orange
         case .notStarted: return .blue
-        case .ended: return .gray
+        case .ended, .disabled: return .gray
         }
     }
 }

@@ -36,7 +36,7 @@ struct MenuBarPopover: View {
             UsageSection(usageService: usageService)
 
             // Schedule info (only when promo is active)
-            if AppSettings.shared.showPromoTimer && appState.status != .ended {
+            if AppSettings.shared.showPromoTimer && appState.status != .ended && appState.status != .disabled {
                 Divider()
                 ScheduleSection()
             }
@@ -90,7 +90,7 @@ struct MenuBarPopover: View {
         case .active2x: return .green
         case .peak1x: return .orange
         case .notStarted: return .blue
-        case .ended: return .gray
+        case .ended, .disabled: return .gray
         }
     }
 
@@ -171,7 +171,7 @@ struct ScheduleSection: View {
                 Text("Peak (1x):")
                     .font(.system(size: 11, weight: .medium))
                     .frame(width: 65, alignment: .leading)
-                Text("Weekdays \(PromoSchedule.peakHoursLocalString())")
+                Text("Weekdays \(PromoSchedule.shared.peakHoursLocalString())")
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
             }
@@ -185,7 +185,7 @@ struct ScheduleSection: View {
                     .foregroundColor(.secondary)
             }
 
-            Text("Promo ends: \(PromoSchedule.promoEndLocalString())")
+            Text("Promo ends: \(PromoSchedule.shared.promoEndLocalString())")
                 .font(.system(size: 10))
                 .foregroundColor(.secondary.opacity(0.7))
                 .padding(.top, 2)

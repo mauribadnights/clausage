@@ -5,12 +5,16 @@ set -e
 # Defaults to patch if no argument given.
 #
 # This script:
-# 1. Runs tests
-# 2. Bumps the version (semver)
-# 3. Updates Info.plist
-# 4. Commits the version bump
-# 5. Tags the commit
-# 6. Pushes to origin (triggers CI release workflow)
+# 1. Ensures you're on dev with a clean tree
+# 2. Runs tests
+# 3. Bumps the version (semver)
+# 4. Updates Info.plist
+# 5. Commits the version bump to dev
+# 6. Pushes dev
+# 7. Creates a PR from dev → main
+# 8. Merges the PR (CI must pass first)
+# 9. Tags main with the new version
+# 10. Pushes the tag (triggers release workflow)
 
 BUMP_TYPE="${1:-patch}"
 
@@ -25,14 +29,17 @@ if [ -n "$(git status --porcelain)" ]; then
     exit 1
 fi
 
-# Ensure we're on main
+# Ensure we're on dev
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
-if [ "$BRANCH" != "main" ]; then
-    echo "Error: Must be on main branch (currently on $BRANCH)"
+if [ "$BRANCH" != "dev" ]; then
+    echo "Error: Must be on dev branch (currently on $BRANCH)"
     exit 1
 fi
 
-# Run tests first
+# Ensure dev is up to date
+git pull origin dev
+
+# Run tests
 echo "Running tests..."
 swift test
 echo "Tests passed."
@@ -62,29 +69,54 @@ echo ""
 # Update Info.plist
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $NEW_VERSION" Clausage/Info.plist
 
-# Generate changelog from commits since last tag
-echo "## What's Changed" > /tmp/clausage-changelog.md
-echo "" >> /tmp/clausage-changelog.md
-git log "$CURRENT_TAG"..HEAD --pretty=format:"- %s" --no-merges >> /tmp/clausage-changelog.md
-echo "" >> /tmp/clausage-changelog.md
-
+# Generate changelog
+CHANGELOG=$(git log "$CURRENT_TAG"..HEAD --pretty=format:"- %s" --no-merges | grep -v "^- Release v")
 echo "Changelog:"
-cat /tmp/clausage-changelog.md
+echo "$CHANGELOG"
 echo ""
 
-# Commit version bump
+# Commit version bump on dev
 git add Clausage/Info.plist
-git commit -m "Release $NEW_TAG"
+git commit -m "Bump version to $NEW_VERSION"
+git push origin dev
 
-# Tag
-git tag -a "$NEW_TAG" -m "Release $NEW_VERSION" -m "$(cat /tmp/clausage-changelog.md)"
+# Create PR from dev → main
+echo "Creating PR..."
+PR_URL=$(gh pr create \
+    --base main \
+    --head dev \
+    --title "Release $NEW_TAG" \
+    --body "$(cat <<EOF
+## Release $NEW_TAG
 
-# Push commit and tag
-echo "Pushing to origin..."
-git push origin main
+### Changes since $CURRENT_TAG
+$CHANGELOG
+
+---
+Merging this PR and pushing the tag will trigger the release workflow.
+EOF
+)")
+
+echo "PR created: $PR_URL"
+echo ""
+
+# Wait for CI to pass, then merge
+echo "Waiting for CI checks to pass..."
+gh pr checks "$PR_URL" --watch --fail-fast
+
+echo "CI passed. Merging..."
+gh pr merge "$PR_URL" --merge --delete-branch=false
+
+# Tag the merge commit on main
+git fetch origin main
+git tag -a "$NEW_TAG" origin/main -m "Release $NEW_VERSION" -m "$CHANGELOG"
 git push origin "$NEW_TAG"
+
+# Stay on dev
+git checkout dev
+git pull origin dev
 
 echo ""
 echo "Released $NEW_TAG"
-echo "CI will now build and publish the release at:"
+echo "GitHub Release will be created at:"
 echo "https://github.com/mauribadnights/clausage/releases/tag/$NEW_TAG"

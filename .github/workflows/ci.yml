@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
-    branches: [main]
+    branches: [main, dev]
 
 jobs:
   build-and-test:
@@ -20,17 +20,3 @@ jobs:
 
       - name: Run Tests
         run: swift test
-
-  lint:
-    runs-on: macos-14
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Check for build warnings as errors
-        run: |
-          swift build 2>&1 | tee build-output.txt
-          # Fail if there are any errors (warnings are ok for now)
-          if grep -q "error:" build-output.txt; then
-            echo "Build has errors!"
-            exit 1
-          fi

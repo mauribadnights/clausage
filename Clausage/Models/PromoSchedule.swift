@@ -5,49 +5,56 @@ enum PromoStatus: Equatable {
     case active2x
     case peak1x
     case ended
+    case disabled
 }
 
-struct PromoSchedule {
-    // Promo period: March 13, 2026 00:00 UTC -> March 28, 2026 06:59 UTC
-    static let promoStart: Date = {
-        var components = DateComponents()
-        components.year = 2026
-        components.month = 3
-        components.day = 13
-        components.hour = 0
-        components.minute = 0
-        components.second = 0
-        components.timeZone = TimeZone(identifier: "UTC")
-        return Calendar.current.date(from: components)!
-    }()
+/// Promo schedule loaded from remote/bundled config.
+/// Dates and peak hours are configurable — no hardcoded values.
+final class PromoSchedule {
+    static let shared = PromoSchedule()
 
-    static let promoEnd: Date = {
-        var components = DateComponents()
-        components.year = 2026
-        components.month = 3
-        components.day = 28
-        components.hour = 6
-        components.minute = 59
-        components.second = 59
-        components.timeZone = TimeZone(identifier: "UTC")
-        return Calendar.current.date(from: components)!
-    }()
+    private(set) var promoStart: Date = .distantPast
+    private(set) var promoEnd: Date = .distantPast
+    private(set) var peakStartHour: Int = 12
+    private(set) var peakEndHour: Int = 18
+    private(set) var enabled: Bool = false
 
-    // Peak hours: Weekdays 12:00-18:00 UTC
-    static let peakStartHour = 12
-    static let peakEndHour = 18
-
-    private static var utcCalendar: Calendar = {
+    private var utcCalendar: Calendar = {
         var cal = Calendar(identifier: .gregorian)
-        cal.timeZone = TimeZone(identifier: "UTC")!
+        cal.timeZone = TimeZone(identifier: "UTC") ?? .gmt
         return cal
     }()
 
-    static func currentStatus(at date: Date = Date()) -> PromoStatus {
+    private init() {}
+
+    func update(from config: PromoConfig?) {
+        guard let config, config.enabled else {
+            enabled = false
+            return
+        }
+
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime]
+
+        guard let start = iso.date(from: config.startUTC),
+              let end = iso.date(from: config.endUTC) else {
+            enabled = false
+            return
+        }
+
+        promoStart = start
+        promoEnd = end
+        peakStartHour = config.peakStartHourUTC
+        peakEndHour = config.peakEndHourUTC
+        enabled = true
+    }
+
+    func currentStatus(at date: Date = Date()) -> PromoStatus {
+        guard enabled else { return .disabled }
         if date < promoStart { return .notStarted }
         if date > promoEnd { return .ended }
 
-        let weekday = utcCalendar.component(.weekday, from: date)
+        let weekday = utcCalendar.component(.weekday, from: date) // 1=Sun, 7=Sat
         let isWeekend = weekday == 1 || weekday == 7
 
         if isWeekend { return .active2x }
@@ -59,10 +66,12 @@ struct PromoSchedule {
         return .active2x
     }
 
-    static func nextTransition(from date: Date = Date()) -> (date: Date, nextStatus: PromoStatus)? {
+    func nextTransition(from date: Date = Date()) -> (date: Date, nextStatus: PromoStatus)? {
         let status = currentStatus(at: date)
 
         switch status {
+        case .disabled:
+            return nil
         case .notStarted:
             return (promoStart, .active2x)
         case .ended:
@@ -74,60 +83,70 @@ struct PromoSchedule {
         }
     }
 
-    private static func nextTransitionFrom2x(at date: Date) -> (date: Date, nextStatus: PromoStatus) {
+    private func nextTransitionFrom2x(at date: Date) -> (date: Date, nextStatus: PromoStatus) {
         let weekday = utcCalendar.component(.weekday, from: date)
         let hour = utcCalendar.component(.hour, from: date)
 
         if weekday == 1 || weekday == 7 {
-            var nextMonday = utcCalendar.nextDate(after: date, matching: DateComponents(weekday: 2), matchingPolicy: .nextTime)!
-            nextMonday = utcCalendar.date(bySettingHour: peakStartHour, minute: 0, second: 0, of: nextMonday)!
-            if nextMonday > promoEnd { return (promoEnd, .ended) }
-            return (nextMonday, .peak1x)
+            guard let nextMonday = utcCalendar.nextDate(after: date, matching: DateComponents(weekday: 2), matchingPolicy: .nextTime),
+                  let peakMonday = utcCalendar.date(bySettingHour: peakStartHour, minute: 0, second: 0, of: nextMonday) else {
+                return (promoEnd, .ended)
+            }
+            if peakMonday > promoEnd { return (promoEnd, .ended) }
+            return (peakMonday, .peak1x)
         }
 
         if hour < peakStartHour {
-            var peakToday = utcCalendar.date(bySettingHour: peakStartHour, minute: 0, second: 0, of: date)!
-            if peakToday <= date {
-                peakToday = peakToday.addingTimeInterval(1)
+            guard var peakToday = utcCalendar.date(bySettingHour: peakStartHour, minute: 0, second: 0, of: date) else {
+                return (promoEnd, .ended)
             }
+            if peakToday <= date { peakToday = peakToday.addingTimeInterval(1) }
             if peakToday > promoEnd { return (promoEnd, .ended) }
             return (peakToday, .peak1x)
         } else {
-            let tomorrow = utcCalendar.date(byAdding: .day, value: 1, to: date)!
+            guard let tomorrow = utcCalendar.date(byAdding: .day, value: 1, to: date) else {
+                return (promoEnd, .ended)
+            }
             let tomorrowWeekday = utcCalendar.component(.weekday, from: tomorrow)
 
             if tomorrowWeekday == 1 || tomorrowWeekday == 7 {
-                let nextMonday = utcCalendar.nextDate(after: date, matching: DateComponents(weekday: 2), matchingPolicy: .nextTime)!
-                let peakMonday = utcCalendar.date(bySettingHour: peakStartHour, minute: 0, second: 0, of: nextMonday)!
+                guard let nextMonday = utcCalendar.nextDate(after: date, matching: DateComponents(weekday: 2), matchingPolicy: .nextTime),
+                      let peakMonday = utcCalendar.date(bySettingHour: peakStartHour, minute: 0, second: 0, of: nextMonday) else {
+                    return (promoEnd, .ended)
+                }
                 if peakMonday > promoEnd { return (promoEnd, .ended) }
                 return (peakMonday, .peak1x)
             } else {
-                let peakTomorrow = utcCalendar.date(bySettingHour: peakStartHour, minute: 0, second: 0, of: tomorrow)!
+                guard let peakTomorrow = utcCalendar.date(bySettingHour: peakStartHour, minute: 0, second: 0, of: tomorrow) else {
+                    return (promoEnd, .ended)
+                }
                 if peakTomorrow > promoEnd { return (promoEnd, .ended) }
                 return (peakTomorrow, .peak1x)
             }
         }
     }
 
-    private static func nextTransitionFromPeak(at date: Date) -> (date: Date, nextStatus: PromoStatus) {
-        var peakEnd = utcCalendar.date(bySettingHour: peakEndHour, minute: 0, second: 0, of: date)!
-        if peakEnd <= date {
-            peakEnd = peakEnd.addingTimeInterval(1)
+    private func nextTransitionFromPeak(at date: Date) -> (date: Date, nextStatus: PromoStatus) {
+        guard var peakEnd = utcCalendar.date(bySettingHour: peakEndHour, minute: 0, second: 0, of: date) else {
+            return (promoEnd, .ended)
         }
+        if peakEnd <= date { peakEnd = peakEnd.addingTimeInterval(1) }
         if peakEnd > promoEnd { return (promoEnd, .ended) }
         return (peakEnd, .active2x)
     }
 
-    static func peakHoursLocalString() -> String {
+    func peakHoursLocalString() -> String {
         let formatter = DateFormatter()
         formatter.timeZone = TimeZone.current
         formatter.dateFormat = "h:mm a"
 
         var cal = Calendar(identifier: .gregorian)
-        cal.timeZone = TimeZone(identifier: "UTC")!
+        cal.timeZone = TimeZone(identifier: "UTC") ?? .gmt
         let today = Date()
-        let startDate = cal.date(bySettingHour: peakStartHour, minute: 0, second: 0, of: today)!
-        let endDate = cal.date(bySettingHour: peakEndHour, minute: 0, second: 0, of: today)!
+        guard let startDate = cal.date(bySettingHour: peakStartHour, minute: 0, second: 0, of: today),
+              let endDate = cal.date(bySettingHour: peakEndHour, minute: 0, second: 0, of: today) else {
+            return "Unknown"
+        }
 
         let start = formatter.string(from: startDate)
         let end = formatter.string(from: endDate)
@@ -135,7 +154,7 @@ struct PromoSchedule {
         return "\(start) - \(end) \(tz)"
     }
 
-    static func promoEndLocalString() -> String {
+    func promoEndLocalString() -> String {
         let formatter = DateFormatter()
         formatter.timeZone = TimeZone.current
         formatter.dateStyle = .medium
