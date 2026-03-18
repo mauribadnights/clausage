@@ -138,7 +138,7 @@ final class UsageService {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("clausage/1.0.0", forHTTPHeaderField: "User-Agent")
+        request.setValue("claude-code/2.1.77", forHTTPHeaderField: "User-Agent")
         request.timeoutInterval = 10
 
         let semaphore = DispatchSemaphore(value: 0)
