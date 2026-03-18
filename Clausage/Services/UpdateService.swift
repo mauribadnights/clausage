@@ -16,9 +16,8 @@ final class UpdateService {
 
     init() {
         checkTimer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.checkForUpdate()
-            }
+            let s = self
+            Task { @MainActor in s?.checkForUpdate() }
         }
         Task { @MainActor in
             self.checkForUpdate()
@@ -30,9 +29,9 @@ final class UpdateService {
         isChecking = true
         updateError = nil
 
-        Task.detached(priority: .utility) { [weak self] in
+        Task.detached(priority: .utility) {
             let result = Self.fetchLatestRelease()
-            await MainActor.run {
+            await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.isChecking = false
                 switch result {
@@ -55,9 +54,9 @@ final class UpdateService {
         isUpdating = true
         updateError = nil
 
-        Task.detached(priority: .userInitiated) { [weak self] in
+        Task.detached(priority: .userInitiated) {
             let result = Self.downloadAndInstall(version: version)
-            await MainActor.run {
+            await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.isUpdating = false
                 switch result {

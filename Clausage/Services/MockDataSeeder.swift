@@ -1,47 +1,76 @@
 import Foundation
 import SwiftData
 
+#if DEBUG
 enum MockDataSeeder {
-    /// Seeds realistic usage history data for testing.
-    /// Simulates 7 days of usage data with realistic patterns:
-    /// - Higher usage during work hours
-    /// - Lower usage at night and weekends
-    /// - Occasional limit hits
-    /// - Natural variance
-    static func seedHistory(context: ModelContext, days: Int = 7) throws {
-        // Clear existing mock data first
+
+    enum UsagePattern {
+        case heavyUser      // Consistently high usage, frequently hits limits
+        case lightUser      // Barely uses the plan
+        case moderate       // Normal usage, rarely hits limits
+        case limitHitter    // Extreme — hits 100% constantly
+
+        var description: String {
+            switch self {
+            case .heavyUser: return "heavy user"
+            case .lightUser: return "light user"
+            case .moderate: return "moderate"
+            case .limitHitter: return "limit hitter"
+            }
+        }
+    }
+
+    static func seedHistory(context: ModelContext, days: Int = 7, pattern: UsagePattern = .moderate) throws {
         try clearHistory(context: context)
 
         let now = Date()
-        let intervalBetweenSamples: TimeInterval = 300 // 5 minutes
-        let totalSamples = (days * 24 * 3600) / Int(intervalBetweenSamples)
+        let sampleInterval: TimeInterval = 300 // 5 minutes
+        let totalSamples = (days * 24 * 3600) / Int(sampleInterval)
+
+        let fiveHourResetInterval: TimeInterval = 5 * 3600 // 5 hours in seconds
+        let weeklyResetInterval: TimeInterval = 7 * 24 * 3600
+
+        // Track accumulation within each reset window
+        var fiveHourWindowStart = now.addingTimeInterval(-Double(totalSamples) * sampleInterval)
+        var weeklyWindowStart = fiveHourWindowStart
+        var fiveHourAccum: Double = 0
+        var weeklyAccum: Double = 0
 
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = .current
 
         for i in 0..<totalSamples {
-            let timestamp = now.addingTimeInterval(-Double(totalSamples - i) * intervalBetweenSamples)
+            let timestamp = now.addingTimeInterval(-Double(totalSamples - i) * sampleInterval)
             let hour = cal.component(.hour, from: timestamp)
             let weekday = cal.component(.weekday, from: timestamp)
             let isWeekend = weekday == 1 || weekday == 7
 
-            // Base usage varies by time of day and day of week
-            let baseFiveHour = fiveHourUsage(hour: hour, isWeekend: isWeekend)
-            let baseWeekly = weeklyUsage(dayOffset: i / (24 * 12), totalDays: days)
+            // Reset 5-hour window
+            if timestamp.timeIntervalSince(fiveHourWindowStart) >= fiveHourResetInterval {
+                fiveHourWindowStart = timestamp
+                fiveHourAccum = 0
+            }
 
-            // Add realistic noise
-            let noise1 = Double.random(in: -8...8)
-            let noise2 = Double.random(in: -5...5)
+            // Reset weekly window
+            if timestamp.timeIntervalSince(weeklyWindowStart) >= weeklyResetInterval {
+                weeklyWindowStart = timestamp
+                weeklyAccum = 0
+            }
 
-            let fiveHour = max(0, min(100, baseFiveHour + noise1))
-            let weekly = max(0, min(100, baseWeekly + noise2))
+            // How much usage to add this sample (based on pattern + time of day)
+            let usageRate = sampleUsageRate(pattern: pattern, hour: hour, isWeekend: isWeekend)
+            fiveHourAccum = min(100, fiveHourAccum + usageRate)
+            weeklyAccum = min(100, weeklyAccum + usageRate * 0.15) // Weekly accumulates slower
+
+            let fiveHourResetsAt = fiveHourWindowStart.addingTimeInterval(fiveHourResetInterval)
+            let weeklyResetsAt = weeklyWindowStart.addingTimeInterval(weeklyResetInterval)
 
             let snapshot = UsageSnapshot(
                 timestamp: timestamp,
-                fiveHourPercent: fiveHour,
-                weeklyPercent: weekly,
-                fiveHourResetsAt: timestamp.addingTimeInterval(Double.random(in: 1800...18000)),
-                weeklyResetsAt: nextWeeklyReset(from: timestamp)
+                fiveHourPercent: fiveHourAccum,
+                weeklyPercent: weeklyAccum,
+                fiveHourResetsAt: fiveHourResetsAt,
+                weeklyResetsAt: weeklyResetsAt
             )
             context.insert(snapshot)
         }
@@ -54,46 +83,36 @@ enum MockDataSeeder {
         try context.save()
     }
 
-    /// 5-hour usage pattern: spikes during work hours, low at night
-    private static func fiveHourUsage(hour: Int, isWeekend: Bool) -> Double {
-        if isWeekend {
-            // Weekend: moderate, sporadic usage
-            switch hour {
-            case 0...8: return Double.random(in: 5...15)
-            case 9...12: return Double.random(in: 20...50)
-            case 13...18: return Double.random(in: 30...65)
-            case 19...22: return Double.random(in: 15...40)
-            default: return Double.random(in: 5...10)
-            }
-        } else {
-            // Weekday: heavy usage during work hours
-            switch hour {
-            case 0...6: return Double.random(in: 2...10)
-            case 7...8: return Double.random(in: 15...35)
-            case 9...12: return Double.random(in: 45...85) // Peak coding hours
-            case 13...14: return Double.random(in: 30...55) // Lunch dip
-            case 15...18: return Double.random(in: 50...92) // Afternoon push
-            case 19...21: return Double.random(in: 20...45) // Evening wind-down
-            default: return Double.random(in: 5...15)
-            }
-        }
-    }
+    /// Returns how much usage % to add per 5-minute sample
+    private static func sampleUsageRate(pattern: UsagePattern, hour: Int, isWeekend: Bool) -> Double {
+        let isActiveHour = !isWeekend && (hour >= 9 && hour <= 18)
+        let isEveningHour = hour >= 19 && hour <= 22
+        let isSleepHour = hour >= 23 || hour <= 6
 
-    /// Weekly usage pattern: gradually increases through the week
-    private static func weeklyUsage(dayOffset: Int, totalDays: Int) -> Double {
-        let progress = Double(dayOffset) / Double(max(totalDays, 1))
-        let base = 15 + progress * 55 // Ramps from ~15% to ~70% over the period
-        return base
-    }
+        switch pattern {
+        case .heavyUser:
+            if isSleepHour { return Double.random(in: 0...0.2) }
+            if isActiveHour { return Double.random(in: 1.5...3.5) }
+            if isEveningHour { return Double.random(in: 0.8...2.0) }
+            return Double.random(in: 0.3...1.2) // weekend daytime
 
-    private static func nextWeeklyReset(from date: Date) -> Date {
-        var cal = Calendar(identifier: .gregorian)
-        cal.timeZone = .current
-        // Next Monday at midnight
-        var next = cal.nextDate(after: date, matching: DateComponents(hour: 0, weekday: 2), matchingPolicy: .nextTime)!
-        if next <= date {
-            next = cal.date(byAdding: .weekOfYear, value: 1, to: next)!
+        case .lightUser:
+            if isSleepHour { return 0 }
+            if isActiveHour { return Double.random(in: 0.1...0.5) }
+            return Double.random(in: 0...0.2)
+
+        case .moderate:
+            if isSleepHour { return Double.random(in: 0...0.1) }
+            if isActiveHour { return Double.random(in: 0.6...1.8) }
+            if isEveningHour { return Double.random(in: 0.3...0.8) }
+            return Double.random(in: 0.1...0.5)
+
+        case .limitHitter:
+            if isSleepHour { return Double.random(in: 0.2...0.8) }
+            if isActiveHour { return Double.random(in: 3.0...6.0) }
+            if isEveningHour { return Double.random(in: 1.5...3.5) }
+            return Double.random(in: 0.8...2.5)
         }
-        return next
     }
 }
+#endif

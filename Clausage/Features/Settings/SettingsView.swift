@@ -11,7 +11,9 @@ struct SettingsView: View {
                 MenuBarSettingsSection(settings: settings)
                 ColorSettingsSection(settings: settings)
                 DataSettingsSection(settings: settings, usageService: usageService)
+                #if DEBUG
                 DebugSection()
+                #endif
                 AboutSection()
             }
             .padding(24)
@@ -20,23 +22,45 @@ struct SettingsView: View {
     }
 }
 
+#if DEBUG
 private struct DebugSection: View {
     @Environment(\.modelContext) private var modelContext
     @State private var seedStatus: String?
+    @State private var showConfirm = false
+    @State private var pendingAction: (() -> Void)?
 
     var body: some View {
-        GroupBox("Debug") {
+        GroupBox("Debug (dev only)") {
             VStack(alignment: .leading, spacing: 10) {
-                Text("Seed mock data to test History and Plan Optimizer views.")
+                Text("Seed mock data to test History and Plan Optimizer. This replaces all existing data.")
                     .font(.caption)
                     .foregroundColor(.secondary)
 
+                Text("Usage Patterns")
+                    .font(.caption.bold())
+                    .foregroundColor(.secondary)
+
                 HStack(spacing: 8) {
-                    Button("Seed 7 Days") { seed(days: 7) }
+                    Button("Heavy User") { confirmSeed { seedPattern(.heavyUser) } }
                         .buttonStyle(.bordered)
-                    Button("Seed 30 Days") { seed(days: 30) }
+                    Button("Light User") { confirmSeed { seedPattern(.lightUser) } }
                         .buttonStyle(.bordered)
-                    Button("Clear History") { clearData() }
+                    Button("Moderate") { confirmSeed { seedPattern(.moderate) } }
+                        .buttonStyle(.bordered)
+                    Button("Limit Hitter") { confirmSeed { seedPattern(.limitHitter) } }
+                        .buttonStyle(.bordered)
+                }
+
+                Text("Duration")
+                    .font(.caption.bold())
+                    .foregroundColor(.secondary)
+
+                HStack(spacing: 8) {
+                    Button("7 Days") { confirmSeed { seedDuration(7) } }
+                        .buttonStyle(.bordered)
+                    Button("30 Days") { confirmSeed { seedDuration(30) } }
+                        .buttonStyle(.bordered)
+                    Button("Clear History") { confirmSeed { clearData() } }
                         .buttonStyle(.bordered)
                         .tint(.red)
                 }
@@ -49,12 +73,35 @@ private struct DebugSection: View {
             }
             .padding(8)
         }
+        .alert("Replace existing data?", isPresented: $showConfirm) {
+            Button("Cancel", role: .cancel) { pendingAction = nil }
+            Button("Replace", role: .destructive) {
+                pendingAction?()
+                pendingAction = nil
+            }
+        } message: {
+            Text("This will delete all existing usage history and replace it with mock data.")
+        }
     }
 
-    private func seed(days: Int) {
+    private func confirmSeed(_ action: @escaping () -> Void) {
+        pendingAction = action
+        showConfirm = true
+    }
+
+    private func seedPattern(_ pattern: MockDataSeeder.UsagePattern) {
         do {
-            try MockDataSeeder.seedHistory(context: modelContext, days: days)
-            seedStatus = "Seeded \(days) days of mock data."
+            try MockDataSeeder.seedHistory(context: modelContext, days: 14, pattern: pattern)
+            seedStatus = "Seeded 14 days of \(pattern.description) data."
+        } catch {
+            seedStatus = "Error: \(error.localizedDescription)"
+        }
+    }
+
+    private func seedDuration(_ days: Int) {
+        do {
+            try MockDataSeeder.seedHistory(context: modelContext, days: days, pattern: .moderate)
+            seedStatus = "Seeded \(days) days of moderate usage data."
         } catch {
             seedStatus = "Error: \(error.localizedDescription)"
         }
@@ -69,6 +116,7 @@ private struct DebugSection: View {
         }
     }
 }
+#endif
 
 private struct MenuBarSettingsSection: View {
     @Bindable var settings: AppSettings
@@ -140,12 +188,46 @@ private struct ColorSettingsSection: View {
 
     var body: some View {
         GroupBox("Timer Colors") {
-            VStack(alignment: .leading, spacing: 10) {
-                ColorSwatchPicker(label: "Off-peak (2x)", selection: $settings.activeColor, defaultColor: .defaultGreen)
-                ColorSwatchPicker(label: "Peak (1x)", selection: $settings.peakColor, defaultColor: .defaultRed)
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Off-peak (2x)")
+                        .font(.subheadline)
+                    Spacer()
+                    ColorPicker("", selection: activeColorBinding(settings), supportsOpacity: false)
+                        .labelsHidden()
+                }
+                HStack {
+                    Text("Peak (1x)")
+                        .font(.subheadline)
+                    Spacer()
+                    ColorPicker("", selection: peakColorBinding(settings), supportsOpacity: false)
+                        .labelsHidden()
+                }
             }
             .padding(8)
         }
+    }
+
+    private func activeColorBinding(_ settings: AppSettings) -> Binding<Color> {
+        Binding(
+            get: { Color(nsColor: settings.activeColor.nsColor) },
+            set: { newColor in
+                if let c = NSColor(newColor).usingColorSpace(.sRGB) {
+                    settings.activeColor = TimerColor(red: c.redComponent, green: c.greenComponent, blue: c.blueComponent)
+                }
+            }
+        )
+    }
+
+    private func peakColorBinding(_ settings: AppSettings) -> Binding<Color> {
+        Binding(
+            get: { Color(nsColor: settings.peakColor.nsColor) },
+            set: { newColor in
+                if let c = NSColor(newColor).usingColorSpace(.sRGB) {
+                    settings.peakColor = TimerColor(red: c.redComponent, green: c.greenComponent, blue: c.blueComponent)
+                }
+            }
+        )
     }
 }
 
@@ -195,51 +277,6 @@ private struct AboutSection: View {
                     .foregroundColor(.secondary)
             }
             .padding(8)
-        }
-    }
-}
-
-struct ColorSwatchPicker: View {
-    let label: String
-    @Binding var selection: TimerColor
-    let defaultColor: TimerColor
-
-    private static let presets: [TimerColor] = [
-        TimerColor(red: 0.0, green: 0.60, blue: 0.15),
-        TimerColor(red: 0.18, green: 0.80, blue: 0.35),
-        TimerColor(red: 0.0, green: 0.55, blue: 0.85),
-        TimerColor(red: 0.35, green: 0.35, blue: 0.95),
-        TimerColor(red: 0.60, green: 0.20, blue: 0.85),
-        TimerColor(red: 0.85, green: 0.15, blue: 0.10),
-        TimerColor(red: 1.0, green: 0.40, blue: 0.0),
-        TimerColor(red: 1.0, green: 0.65, blue: 0.0),
-        TimerColor(red: 0.85, green: 0.85, blue: 0.85),
-        TimerColor(red: 1.0, green: 1.0, blue: 1.0),
-    ]
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Text(label)
-                .font(.subheadline)
-                .frame(width: 90, alignment: .leading)
-
-            HStack(spacing: 5) {
-                ForEach(Self.presets.indices, id: \.self) { i in
-                    let preset = Self.presets[i]
-                    Circle()
-                        .fill(Color(nsColor: preset.nsColor))
-                        .frame(width: 18, height: 18)
-                        .overlay(
-                            Circle()
-                                .stroke(selection == preset ? Color.white : Color.clear, lineWidth: 2)
-                        )
-                        .overlay(
-                            Circle()
-                                .stroke(selection == preset ? Color.accentColor : Color.white.opacity(0.2), lineWidth: 0.5)
-                        )
-                        .onTapGesture { selection = preset }
-                }
-            }
         }
     }
 }

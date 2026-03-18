@@ -16,27 +16,23 @@ final class AppState {
     var usageWeekly: Double?
 
     private var timer: Timer?
-    private var usageObservation: Any?
 
     init() {
         update()
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.update()
-            }
+            let s = self
+            Task { @MainActor in s?.update() }
         }
     }
 
     func bindUsage(_ service: UsageService) {
-        // Use withObservationTracking in a polling fashion isn't great,
-        // so we'll use a timer-based approach — usage updates on every tick anyway
-        // since we call update() every second which reads from the service
-        // We just need to capture the reference
         Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self, weak service] _ in
+            let s = self
+            let svc = service
             Task { @MainActor in
-                guard let self, let service else { return }
-                self.usageFiveHour = service.usage.fiveHourPercent
-                self.usageWeekly = service.usage.weeklyPercent
+                guard let s, let svc else { return }
+                s.usageFiveHour = svc.usage.fiveHourPercent
+                s.usageWeekly = svc.usage.weeklyPercent
             }
         }
     }
@@ -50,7 +46,6 @@ final class AppState {
         if settings.showPromoTimer && status != .ended {
             updatePromoState(now: now, fmt: fmt)
         } else {
-            // No promo or promo ended — show usage only
             if let fiveHour = usageFiveHour {
                 menuBarText = "\(Int(fiveHour))%"
             } else {

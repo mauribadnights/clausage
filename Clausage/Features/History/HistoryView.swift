@@ -16,6 +16,29 @@ enum HistoryRange: String, CaseIterable {
         case .all: return nil
         }
     }
+
+    /// Appropriate x-axis date format for this range
+    var dateFormat: Date.FormatStyle {
+        switch self {
+        case .day:
+            return .dateTime.hour(.defaultDigits(amPM: .abbreviated))
+        case .week:
+            return .dateTime.weekday(.abbreviated).hour(.defaultDigits(amPM: .abbreviated))
+        case .month:
+            return .dateTime.month(.abbreviated).day()
+        case .all:
+            return .dateTime.month(.abbreviated).day()
+        }
+    }
+
+    var desiredTickCount: Int {
+        switch self {
+        case .day: return 6
+        case .week: return 7
+        case .month: return 6
+        case .all: return 8
+        }
+    }
 }
 
 struct HistoryView: View {
@@ -31,7 +54,6 @@ struct HistoryView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 20) {
-                // Range picker
                 Picker("Time Range", selection: $selectedRange) {
                     ForEach(HistoryRange.allCases, id: \.self) { range in
                         Text(range.rawValue).tag(range)
@@ -48,23 +70,22 @@ struct HistoryView: View {
                     )
                     .frame(minHeight: 300)
                 } else {
-                    // 5-hour usage chart
                     ChartCard(
                         title: "5-Hour Usage",
                         snapshots: filteredSnapshots,
                         keyPath: \.fiveHourPercent,
-                        color: .blue
+                        color: .blue,
+                        range: selectedRange
                     )
 
-                    // Weekly usage chart
                     ChartCard(
                         title: "Weekly Usage",
                         snapshots: filteredSnapshots,
                         keyPath: \.weeklyPercent,
-                        color: .purple
+                        color: .purple,
+                        range: selectedRange
                     )
 
-                    // Stats summary
                     StatsSummary(snapshots: filteredSnapshots)
                 }
             }
@@ -79,6 +100,7 @@ struct ChartCard: View {
     let snapshots: [UsageSnapshot]
     let keyPath: KeyPath<UsageSnapshot, Double>
     let color: Color
+    let range: HistoryRange
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -113,14 +135,18 @@ struct ChartCard: View {
                 }
             }
             .chartXAxis {
-                AxisMarks(values: .automatic(desiredCount: 6)) { _ in
+                AxisMarks(values: .automatic(desiredCount: range.desiredTickCount)) { value in
                     AxisGridLine()
-                    AxisValueLabel(format: .dateTime.month(.abbreviated).day().hour())
+                    AxisValueLabel {
+                        if let date = value.as(Date.self) {
+                            Text(date, format: range.dateFormat)
+                                .font(.caption2)
+                        }
+                    }
                 }
             }
             .frame(height: 200)
 
-            // Threshold lines annotation
             HStack(spacing: 16) {
                 let values = snapshots.map { $0[keyPath: keyPath] }
                 let avg = values.reduce(0, +) / Double(max(values.count, 1))

@@ -1,8 +1,8 @@
-# Clausage
+# Clausage 🌭
 
 A native macOS app to track your [Claude](https://claude.ai) usage, visualize consumption over time, and get smart plan recommendations.
 
-> *"Clausage"* — Claude + Usage. Also sounds like sausage. Hence the logo.
+> *"Clausage"* — Claude + Usage. Also sounds like sausage 🌭 Hence the logo.
 
 ## Features
 

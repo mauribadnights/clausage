@@ -42,9 +42,8 @@ final class UsageService {
         refreshTimer?.invalidate()
         let interval = AppSettings.shared.refreshInterval
         refreshTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.fetch()
-            }
+            let s = self
+            Task { @MainActor in s?.fetch() }
         }
     }
 
@@ -56,10 +55,10 @@ final class UsageService {
     func fetch() {
         isLoading = true
 
-        Task.detached(priority: .utility) { [weak self] in
+        Task.detached(priority: .utility) {
             let result = Self.fetchUsage()
 
-            await MainActor.run {
+            await MainActor.run { [weak self] in
                 guard let self else { return }
 
                 if result.error != nil {
@@ -71,9 +70,9 @@ final class UsageService {
                     }
 
                     let delay = min(15.0 * pow(2.0, Double(self.consecutiveFailures - 1)), 120.0)
-                    Task {
+                    Task { [weak self] in
                         try? await Task.sleep(for: .seconds(delay))
-                        self.fetch()
+                        await self?.fetch()
                     }
                 } else {
                     self.consecutiveFailures = 0
@@ -142,7 +141,6 @@ final class UsageService {
             return UsageData(error: error.localizedDescription)
         }
 
-        // On 401, refresh token from Claude Code's keychain and retry
         if httpStatusCode == 401 {
             guard let freshToken = KeychainService.refreshToken() else {
                 return UsageData(error: "Authentication failed. Re-login to Claude Code.")

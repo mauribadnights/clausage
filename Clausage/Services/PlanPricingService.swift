@@ -13,7 +13,11 @@ final class PlanPricingService {
     }
 
     private func loadBundled() {
-        guard let url = Bundle.main.url(forResource: "pricing", withExtension: "json"),
+        // SPM resources are in Bundle.module, .app bundle resources in Bundle.main
+        let url = Bundle.module.url(forResource: "pricing", withExtension: "json")
+            ?? Bundle.main.url(forResource: "pricing", withExtension: "json")
+
+        guard let url,
               let data = try? Data(contentsOf: url),
               let decoded = try? JSONDecoder().decode(PricingData.self, from: data) else {
             return
@@ -22,7 +26,7 @@ final class PlanPricingService {
     }
 
     func fetchRemote() {
-        Task.detached(priority: .utility) { [weak self] in
+        Task.detached(priority: .utility) {
             guard let url = URL(string: Self.remoteURL) else { return }
 
             var request = URLRequest(url: url)
@@ -36,12 +40,12 @@ final class PlanPricingService {
                 }
                 let decoded = try JSONDecoder().decode(PricingData.self, from: data)
 
-                await MainActor.run {
+                await MainActor.run { [weak self] in
                     self?.pricing = decoded
                     self?.lastFetchError = nil
                 }
             } catch {
-                await MainActor.run {
+                await MainActor.run { [weak self] in
                     self?.lastFetchError = error.localizedDescription
                 }
             }
@@ -80,7 +84,6 @@ final class PlanPricingService {
         let hitLimitFrequency = Double(timesHitLimit) / Double(analyzed.count)
 
         if hitLimitFrequency > 0.3 || avgWeekly > 80 {
-            // User is consistently hitting limits - suggest upgrade
             let upgrades = pricing.plans.filter { $0.usageMultiplier > currentPlan.usageMultiplier }
             if let nextUp = upgrades.first {
                 return PlanRecommendation(
@@ -96,7 +99,6 @@ final class PlanPricingService {
         }
 
         if avgWeekly < 20 && avgFiveHour < 30 && currentPlan.monthlyPrice > 0 {
-            // User is barely using their plan - suggest downgrade
             let downgrades = pricing.plans.filter { $0.usageMultiplier < currentPlan.usageMultiplier && $0.monthlyPrice < currentPlan.monthlyPrice }
             if let nextDown = downgrades.last {
                 let savings = currentPlan.monthlyPrice - nextDown.monthlyPrice
