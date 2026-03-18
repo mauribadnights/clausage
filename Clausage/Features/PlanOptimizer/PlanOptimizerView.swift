@@ -39,6 +39,9 @@ struct PlanOptimizerView: View {
                     TokenPricingTable(pricing: pricing.tokenPricing)
                 }
 
+                // Disclaimer
+                DisclaimerSection()
+
                 // Pricing data info
                 HStack {
                     if let lastUpdated = pricingService.pricing?.lastUpdated {
@@ -220,6 +223,56 @@ struct PlanComparisonTable: View {
             .padding(16)
             .background(.quaternary.opacity(0.5))
             .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+    }
+}
+
+struct DisclaimerSection: View {
+    @State private var isExpanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button(action: { withAnimation(.easeInOut(duration: 0.15)) { isExpanded.toggle() } }) {
+                HStack(spacing: 6) {
+                    Image(systemName: "info.circle")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Text("About these recommendations")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 8, weight: .medium))
+                        .foregroundColor(.secondary)
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                }
+            }
+            .buttonStyle(.plain)
+
+            if isExpanded {
+                Text("""
+                Recommendations are based solely on the usage data Clausage has collected while running. \
+                There may be gaps in the data — for instance, if the app wasn't running or the API was \
+                temporarily unavailable — which can affect accuracy. Additionally, Anthropic may change \
+                plan pricing, usage limits, or introduce new plans at any time, and there can be a delay \
+                before Clausage reflects those changes.
+
+                These recommendations are meant as a helpful starting point, not a guarantee of the \
+                cheapest or best option. Your actual usage patterns, workflow needs, and how you value \
+                features like higher rate limits or priority access are factors only you can weigh. \
+                We encourage you to use your own judgment alongside these suggestions.
+
+                That said, we're constantly working to improve our recommendation algorithms — refining \
+                how we analyze usage patterns, adjusting for pricing changes, and accounting for edge \
+                cases. Our goal is to give you the most useful guidance possible, but the final decision \
+                is always yours.
+                """)
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .padding(12)
+                .background(.quaternary.opacity(0.3))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
         }
     }
 }
