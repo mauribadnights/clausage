@@ -4,6 +4,15 @@ A native macOS app to track your [Claude](https://claude.ai) usage, visualize co
 
 > *"Clausage"* — Claude + Usage. Also sounds like sausage 🌭 Hence the logo.
 
+<p align="center">
+  <img src="screenshots/menubar.png" width="320" alt="Menu Bar">
+  &nbsp;&nbsp;
+  <img src="screenshots/dashboard.png" width="480" alt="Dashboard">
+</p>
+<p align="center">
+  <img src="screenshots/optimizer.png" width="480" alt="Plan Optimizer">
+</p>
+
 ## Requirements
 
 - **macOS 14.0** (Sonoma) or later
