@@ -41,9 +41,9 @@ final class AppState {
         let now = Date()
         let settings = AppSettings.shared
         let fmt = settings.timerFormat
-        status = PromoSchedule.currentStatus(at: now)
+        status = PromoSchedule.shared.currentStatus(at: now)
 
-        if settings.showPromoTimer && status != .ended {
+        if settings.showPromoTimer && status != .ended && status != .disabled {
             updatePromoState(now: now, fmt: fmt)
         } else {
             if let fiveHour = usageFiveHour {
@@ -67,8 +67,10 @@ final class AppState {
 
     private func updatePromoState(now: Date, fmt: TimerFormat) {
         switch status {
+        case .disabled:
+            return // Should not be called when disabled
         case .notStarted:
-            let interval = PromoSchedule.promoStart.timeIntervalSince(now)
+            let interval = PromoSchedule.shared.promoStart.timeIntervalSince(now)
             let formatted = fmt.format(interval)
             menuBarText = formatted
             statusDescription = "Promo hasn't started yet"
@@ -76,7 +78,7 @@ final class AppState {
             nextTransitionDescription = "2x usage begins when promo starts"
 
         case .active2x:
-            if let transition = PromoSchedule.nextTransition(from: now) {
+            if let transition = PromoSchedule.shared.nextTransition(from: now) {
                 let interval = transition.date.timeIntervalSince(now)
                 let formatted = fmt.format(interval)
                 menuBarText = formatted
@@ -93,7 +95,7 @@ final class AppState {
             statusDescription = "2x Usage Active"
 
         case .peak1x:
-            if let transition = PromoSchedule.nextTransition(from: now) {
+            if let transition = PromoSchedule.shared.nextTransition(from: now) {
                 let interval = transition.date.timeIntervalSince(now)
                 let formatted = fmt.format(interval)
                 menuBarText = formatted
@@ -122,8 +124,7 @@ final class AppState {
         switch status {
         case .active2x: return settings.activeColor.nsColor
         case .peak1x: return settings.peakColor.nsColor
-        case .notStarted: return .labelColor
-        case .ended: return .labelColor
+        case .notStarted, .ended, .disabled: return .labelColor
         }
     }
 

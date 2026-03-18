@@ -7,7 +7,7 @@
     <key>CFBundleExecutable</key>
     <string>Clausage</string>
     <key>CFBundleIdentifier</key>
-    <string>com.mauricio.Clausage</string>
+    <string>com.clausage.app</string>
     <key>CFBundleName</key>
     <string>Clausage</string>
     <key>CFBundlePackageType</key>

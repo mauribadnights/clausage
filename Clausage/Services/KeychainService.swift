@@ -6,7 +6,7 @@ import Security
 /// After that, the token is cached in our own keychain item (no prompts ever).
 enum KeychainService {
     private static let claudeCodeService = "Claude Code-credentials"
-    private static let cacheService = "com.mauricio.Clausage.token-cache"
+    private static let cacheService = "com.clausage.app.token-cache"
     private static let cacheAccount = "claude-oauth"
 
     /// Get the OAuth access token, using cache to avoid keychain prompts.

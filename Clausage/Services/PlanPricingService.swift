@@ -22,6 +22,7 @@ final class PlanPricingService {
             return
         }
         pricing = decoded
+        PromoSchedule.shared.update(from: decoded.promo)
     }
 
     func fetchRemote() {
@@ -42,6 +43,7 @@ final class PlanPricingService {
                 await MainActor.run { [weak self] in
                     self?.pricing = decoded
                     self?.lastFetchError = nil
+                    PromoSchedule.shared.update(from: decoded.promo)
                 }
             } catch {
                 await MainActor.run { [weak self] in

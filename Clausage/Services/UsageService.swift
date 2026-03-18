@@ -138,6 +138,8 @@ final class UsageService {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        // The usage API is undocumented and rate-limits unknown user agents.
+        // Using the Claude Code UA is necessary until Anthropic provides a public usage API.
         request.setValue("claude-code/2.1.77", forHTTPHeaderField: "User-Agent")
         request.timeoutInterval = 10
 

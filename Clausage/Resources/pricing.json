@@ -49,5 +49,13 @@
             "inputPerMillion": 1.0,
             "outputPerMillion": 5.0
         }
-    ]
+    ],
+    "promo": {
+        "enabled": true,
+        "startUTC": "2026-03-13T00:00:00Z",
+        "endUTC": "2026-03-28T06:59:59Z",
+        "peakStartHourUTC": 12,
+        "peakEndHourUTC": 18,
+        "description": "2x usage outside peak hours"
+    }
 }

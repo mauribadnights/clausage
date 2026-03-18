@@ -41,7 +41,8 @@ final class PlanTierTests: XCTestCase {
             ],
             tokenPricing: [
                 TokenPricing(model: "opus", displayName: "Opus", inputPerMillion: 5, outputPerMillion: 25)
-            ]
+            ],
+            promo: nil
         )
 
         let data = try JSONEncoder().encode(pricing)
