@@ -1,7 +1,17 @@
 import XCTest
+import SwiftData
 @testable import Clausage
 
+@MainActor
 final class PlanPricingTests: XCTestCase {
+
+    private var container: ModelContainer!
+
+    override func setUp() {
+        super.setUp()
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        container = try! ModelContainer(for: UsageSnapshot.self, configurations: config)
+    }
 
     // MARK: - PricingData decoding
 
@@ -180,13 +190,17 @@ final class PlanPricingTests: XCTestCase {
         return try JSONDecoder().decode(PricingData.self, from: data)
     }
 
+    @MainActor
     private func makeSnapshots(count: Int, fiveHour: Double, weekly: Double) -> [UsageSnapshot] {
-        (0..<count).map { i in
-            UsageSnapshot(
+        let context = container.mainContext
+        return (0..<count).map { i in
+            let snapshot = UsageSnapshot(
                 timestamp: Date().addingTimeInterval(Double(-i) * 300),
                 fiveHourPercent: fiveHour + Double.random(in: -3...3),
                 weeklyPercent: weekly + Double.random(in: -3...3)
             )
+            context.insert(snapshot)
+            return snapshot
         }
     }
 }
