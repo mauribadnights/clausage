@@ -1,0 +1,53 @@
+{
+    "lastUpdated": "2026-03-18",
+    "plans": [
+        {
+            "id": "free",
+            "name": "Free",
+            "monthlyPrice": 0,
+            "description": "Basic access to Claude",
+            "usageMultiplier": 1.0
+        },
+        {
+            "id": "pro",
+            "name": "Pro",
+            "monthlyPrice": 20,
+            "description": "5x more usage than Free",
+            "usageMultiplier": 5.0
+        },
+        {
+            "id": "max_5x",
+            "name": "Max (5x Pro)",
+            "monthlyPrice": 100,
+            "description": "5x more usage than Pro",
+            "usageMultiplier": 25.0
+        },
+        {
+            "id": "max_20x",
+            "name": "Max (20x Pro)",
+            "monthlyPrice": 200,
+            "description": "20x more usage than Pro",
+            "usageMultiplier": 100.0
+        }
+    ],
+    "tokenPricing": [
+        {
+            "model": "claude-opus-4-6",
+            "displayName": "Claude Opus 4.6",
+            "inputPerMillion": 5.0,
+            "outputPerMillion": 25.0
+        },
+        {
+            "model": "claude-sonnet-4-6",
+            "displayName": "Claude Sonnet 4.6",
+            "inputPerMillion": 3.0,
+            "outputPerMillion": 15.0
+        },
+        {
+            "model": "claude-haiku-4-5",
+            "displayName": "Claude Haiku 4.5",
+            "inputPerMillion": 1.0,
+            "outputPerMillion": 5.0
+        }
+    ]
+}

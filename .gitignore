@@ -1,0 +1,6 @@
+.build/
+*.app/
+*.app.zip
+.swiftpm/
+.DS_Store
+CLAUDE.md
