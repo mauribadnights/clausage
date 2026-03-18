@@ -4,39 +4,6 @@ A native macOS app to track your [Claude](https://claude.ai) usage, visualize co
 
 > *"Clausage"* — Claude + Usage. Also sounds like sausage 🌭 Hence the logo.
 
-## Features
-
-### Menu Bar
-- **Live usage display** in the menu bar with color-coded status
-- **Usage bars** showing 5-hour and weekly consumption at a glance
-- **Promo countdown timer** with peak/off-peak schedule awareness
-- **Customizable** — timer format, colors, text shadow, toggle bars on/off
-
-### Dashboard
-- **Real-time usage cards** for 5-hour and weekly windows
-- **Reset countdowns** showing when each usage window resets
-- **Promo status** with countdown timer and schedule info
-
-### Usage History
-- **Automatic tracking** — usage is recorded every 5 minutes
-- **Interactive charts** powered by Swift Charts
-- **Time range filters** — 24h, 7d, 30d, or all time
-- **Statistics** — average usage, max peaks, limit hit frequency
-
-### Plan Optimizer
-- **Plan comparison table** with cost-per-unit analysis
-- **Smart recommendations** — upgrade, downgrade, or stay put
-- **Usage-based analysis** using your actual consumption patterns
-- **Token pricing reference** for API cost comparison
-- **Auto-updating pricing** — fetches latest pricing from GitHub, falls back to bundled data
-
-### Quality of Life
-- **One-time keychain prompt** — caches your Claude Code OAuth token so you're never prompted again
-- **Auto-update** — checks for new releases hourly, one-click update
-- **Dynamic dock icon** — shows in dock when the main window is open, hides when minimized to menu bar
-- **Works in any timezone** — all schedules display in your local time
-- **Zero dependencies** — pure Swift/SwiftUI, native macOS frameworks only
-
 ## Requirements
 
 - **macOS 14.0** (Sonoma) or later
@@ -63,6 +30,38 @@ open Clausage.app
 
 Requires Xcode 15+ and Swift 5.9+.
 
+## Features
+
+### Menu Bar
+- **Live usage display** in the menu bar with color-coded status
+- **Usage bars** showing 5-hour and weekly consumption at a glance
+- **Promo countdown timer** with peak/off-peak schedule awareness
+- **Customizable** — timer format, colors, text shadow, toggle bars on/off
+
+### Dashboard
+- **Real-time usage cards** for 5-hour and weekly windows
+- **Reset countdowns** showing when each usage window resets
+- **Promo status** with countdown timer and schedule info
+
+### Usage History
+- **Automatic tracking** — usage is recorded every 5 minutes
+- **Interactive charts** powered by Swift Charts
+- **Time range filters** — 24h, 7d, 30d, or all time
+- **Statistics** — average usage, max peaks, % of time at limit
+
+### Plan Optimizer
+- **Per-plan projection table** showing projected utilization, time at limit, and headroom for every plan
+- **Natural language insights** analyzing your usage patterns and suggesting the cheapest plan that fits
+- **Token pricing reference** for comparing API supplementation costs
+- **Auto-updating pricing** — fetches latest pricing from GitHub, falls back to bundled data
+
+### Quality of Life
+- **One-time keychain prompt** — caches your Claude Code OAuth token so you're never prompted again
+- **Auto-update** — checks for new releases hourly, one-click update
+- **Dynamic dock icon** — shows in dock when the main window is open, hides when minimized to menu bar
+- **Works in any timezone** — all schedules display in your local time
+- **Zero dependencies** — pure Swift/SwiftUI, native macOS frameworks only
+
 ## How It Works
 
 ### Usage Tracking
@@ -71,19 +70,35 @@ Clausage reads your Claude Code OAuth token from the macOS Keychain and calls th
 
 The first time the app reads your token, macOS will show a Keychain prompt — click **Allow** (or **Always Allow**). Clausage caches the token in its own Keychain entry so you're never prompted again.
 
-### Plan Recommendations
+### Plan Optimizer
 
-The Plan Optimizer analyzes your usage history and compares it against your current plan:
+The Plan Optimizer projects your actual usage onto every available plan by scaling with each plan's capacity multiplier. For each plan it shows:
 
-- **Upgrade** — recommended when you're hitting usage limits frequently (>30% of samples at 95%+)
-- **Downgrade** — recommended when your average usage is below 20% of your plan's capacity
-- **Stay put** — when your plan matches your usage patterns well
+- **Projected average utilization** (5-hour and weekly windows)
+- **% of time you'd be at the limit**
+- **Headroom** remaining
 
-Recommendations include specific stats: average 5-hour usage, average weekly usage, and how many times you've hit the limit.
+It then generates a natural language insight suggesting the cheapest plan where you'd rarely hit limits, and notes when API token supplementation might be worth considering.
 
 ### Pricing Data
 
 Plan and token pricing is bundled with the app and also fetched from this repository's `pricing.json`. This means pricing stays current without requiring an app update. If the remote fetch fails, the bundled data is used as a fallback.
+
+## Configuration
+
+All settings are accessible from the main window's Settings tab:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Timer format | `1:32:42` | Choose: full, compact, labeled, or minimal |
+| Usage bars | On | Show mini usage bars in the menu bar |
+| Text shadow | Off | Add shadow to menu bar text |
+| Promo timer | On | Show 2x promo countdown (auto-hides when promo ends) |
+| Refresh interval | 5 min | How often to poll the Anthropic API |
+| Current plan | Pro | Your Claude subscription (for plan projections) |
+| Timer colors | Any | Full color picker for off-peak and peak colors |
+
+Settings persist across launches via UserDefaults.
 
 ## Development
 
@@ -96,21 +111,21 @@ Clausage/
 │   ├── MenuBar/            # Menu bar popover
 │   ├── Dashboard/          # Main window, usage cards
 │   ├── History/            # Usage charts (Swift Charts)
-│   ├── PlanOptimizer/      # Plan comparison & recommendations
+│   ├── PlanOptimizer/      # Per-plan projections & insights
 │   └── Settings/           # Preferences + debug tools
 ├── Services/
 │   ├── KeychainService     # OAuth token with caching
 │   ├── UsageService        # Anthropic API client + persistence
 │   ├── UpdateService       # GitHub release auto-updater
-│   ├── PlanPricingService  # Pricing data + recommendation engine
+│   ├── PlanPricingService  # Pricing data + projection engine
 │   └── MockDataSeeder      # Debug: seed test data
 ├── Models/
-│   ├── PromoSchedule       # 2x promo timer logic
+│   ├── PromoSchedule       # Promo timer (remote-configurable)
 │   ├── UsageSnapshot       # SwiftData model
 │   ├── PlanTier            # Plan & token pricing models
 │   └── AppSettings         # User preferences
 └── Resources/
-    ├── pricing.json        # Bundled pricing data
+    ├── pricing.json        # Bundled pricing + promo config
     └── Assets.xcassets     # App icon
 ```
 
@@ -120,46 +135,20 @@ Clausage/
 swift test
 ```
 
-Tests cover:
-- Promo schedule logic (status transitions, boundary conditions, timezone display)
-- Timer formatting (all formats, edge cases, day overflow)
-- Version comparison (semver parsing, v-prefix handling)
-- Plan pricing (JSON decoding, recommendation algorithm, edge cases)
-- Usage data (reset time formatting, equality)
-- SwiftData persistence (insert, fetch, sort)
+80 tests covering promo schedule, timer formatting, version comparison, plan projections, usage data, and SwiftData persistence.
 
 ### Debug Mode
 
-In debug builds, the Settings view includes a **Debug** section where you can:
-- **Seed 7 or 30 days** of realistic mock usage data
-- **Clear history** to start fresh
-
-This lets you test the History charts and Plan Optimizer recommendations without waiting for real data to accumulate.
+Debug builds (`./run-debug.sh`) include a **Debug** section in Settings with usage pattern presets (Heavy User, Light User, Moderate, Limit Hitter) to test History charts and Plan Optimizer projections.
 
 ### CI/CD
 
-- **CI** — runs on every push to `main` and on PRs. Builds and runs the full test suite.
-- **Release** — tag a version (`git tag v1.0.0 && git push --tags`) to automatically build, test, and publish a GitHub Release with `Clausage.app.zip`.
+- **CI** — runs on every push and PR. Builds and runs the full test suite.
+- **Release** — `./release.sh [patch|minor|major]` creates a PR to main, waits for CI, merges, tags, and triggers a GitHub Release with `Clausage.app.zip`.
 
 ### Updating Pricing
 
-Edit `Clausage/Resources/pricing.json` and push to `main`. The app fetches this file periodically, so users get updated pricing without an app update.
-
-## Configuration
-
-All settings are accessible from the main window's Settings tab or the menu bar popover:
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| Timer format | `1:32:42` | Choose: full, compact, labeled, or minimal |
-| Usage bars | On | Show mini usage bars in the menu bar |
-| Text shadow | Off | Add shadow to menu bar text |
-| Promo timer | On | Show 2x promo countdown (auto-hides when promo ends) |
-| Refresh interval | 5 min | How often to poll the Anthropic API |
-| Current plan | Pro | Your Claude subscription (for plan recommendations) |
-| Timer colors | Green/Red | Customize off-peak and peak colors |
-
-Settings persist across launches via UserDefaults.
+Edit `Clausage/Resources/pricing.json` and push to `main`. The app fetches this file periodically, so users get updated pricing without an app update. Set `promo.enabled` to `false` to disable the promo timer remotely.
 
 ## License
 
