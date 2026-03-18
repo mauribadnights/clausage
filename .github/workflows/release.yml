@@ -28,7 +28,31 @@ jobs:
       - name: Create zip archive
         run: zip -r Clausage.app.zip Clausage.app
 
-      - name: Create GitHub Release
+      - name: Extract tag changelog
+        id: changelog
+        run: |
+          # Get the tag message (which contains the changelog from release.sh)
+          TAG_MSG=$(git tag -l --format='%(contents)' "${GITHUB_REF_NAME}")
+          # Fall back to auto-generated notes if tag has no message
+          if [ -z "$TAG_MSG" ]; then
+            echo "has_notes=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_notes=true" >> "$GITHUB_OUTPUT"
+            # Write to file to preserve newlines
+            echo "$TAG_MSG" > /tmp/release-notes.md
+          fi
+
+      - name: Create GitHub Release (with tag notes)
+        if: steps.changelog.outputs.has_notes == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Clausage.app.zip
+          body_path: /tmp/release-notes.md
+          draft: false
+          prerelease: false
+
+      - name: Create GitHub Release (auto-generated notes)
+        if: steps.changelog.outputs.has_notes != 'true'
         uses: softprops/action-gh-release@v2
         with:
           files: Clausage.app.zip
