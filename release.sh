@@ -70,7 +70,11 @@ echo ""
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $NEW_VERSION" Clausage/Info.plist
 
 # Generate changelog
-CHANGELOG=$(git log "$CURRENT_TAG"..HEAD --pretty=format:"- %s" --no-merges | grep -v "^- Release v")
+if git rev-parse "$CURRENT_TAG" >/dev/null 2>&1; then
+    CHANGELOG=$(git log "$CURRENT_TAG"..HEAD --pretty=format:"- %s" --no-merges | grep -v "^- Release v" | grep -v "^- Bump version")
+else
+    CHANGELOG=$(git log --pretty=format:"- %s" --no-merges -20 | grep -v "^- Release v" | grep -v "^- Bump version")
+fi
 echo "Changelog:"
 echo "$CHANGELOG"
 echo ""
