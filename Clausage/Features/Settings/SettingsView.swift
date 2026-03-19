@@ -359,7 +359,7 @@ private struct AboutSection: View {
 
                 HStack {
                     if let newVersion = updateService.updateAvailable {
-                        Label("v\(newVersion) available", systemImage: "arrow.down.circle.fill")
+                        Label("\(newVersion) available", systemImage: "arrow.down.circle.fill")
                             .font(.caption)
                             .foregroundColor(.green)
                         Spacer()
