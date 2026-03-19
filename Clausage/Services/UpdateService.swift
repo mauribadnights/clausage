@@ -182,6 +182,16 @@ final class UpdateService {
             try? FileManager.default.removeItem(at: backupURL)
             try FileManager.default.moveItem(at: currentURL, to: backupURL)
             try FileManager.default.moveItem(at: newAppPath, to: currentURL)
+
+            // Remove quarantine flag from downloaded app
+            let xattr = Process()
+            xattr.executableURL = URL(fileURLWithPath: "/usr/bin/xattr")
+            xattr.arguments = ["-rd", "com.apple.quarantine", currentURL.path]
+            xattr.standardOutput = FileHandle.nullDevice
+            xattr.standardError = FileHandle.nullDevice
+            try? xattr.run()
+            xattr.waitUntilExit()
+
             try? FileManager.default.removeItem(at: backupURL)
             try? FileManager.default.removeItem(at: tempDir)
 
@@ -193,9 +203,19 @@ final class UpdateService {
 
     private static func relaunch() {
         guard let appPath = Bundle.main.bundleURL.path.removingPercentEncoding else { return }
+        // Use a longer delay and explicit relaunch to ensure the old process is fully gone
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/bin/sh")
-        task.arguments = ["-c", "sleep 1 && open \"\(appPath)\""]
+        task.arguments = ["-c", """
+            sleep 2
+            open "\(appPath)"
+            # If open fails (e.g. quarantine), try again after clearing it
+            if [ $? -ne 0 ]; then
+                xattr -rd com.apple.quarantine "\(appPath)" 2>/dev/null
+                sleep 1
+                open "\(appPath)"
+            fi
+            """]
         try? task.run()
         NSApplication.shared.terminate(nil)
     }
