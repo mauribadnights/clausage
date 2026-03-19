@@ -172,26 +172,86 @@ struct PlanProjectionTable: View {
             Text("Plan Comparison")
                 .font(.headline)
 
-            VStack(spacing: 0) {
+            Grid(alignment: .center, horizontalSpacing: 0, verticalSpacing: 0) {
                 // Header
-                HStack(spacing: 0) {
-                    headerCell("Plan", width: 120, alignment: .leading)
-                    headerCell("Price", width: 70)
-                    headerCell("Avg 5h", width: 65)
-                    headerCell("Avg Wk", width: 65)
-                    headerCell("At 5h Limit", width: 80)
-                    headerCell("At Wk Limit", width: 80)
-                    headerCell("Headroom", width: 75)
+                GridRow {
+                    Text("Plan").frame(maxWidth: .infinity, alignment: .leading)
+                    Text("Price").frame(maxWidth: .infinity)
+                    Text("Avg 5h").frame(maxWidth: .infinity)
+                    Text("Avg Wk").frame(maxWidth: .infinity)
+                    Text("At 5h Limit").frame(maxWidth: .infinity)
+                    Text("At Wk Limit").frame(maxWidth: .infinity)
+                    Text("Headroom").frame(maxWidth: .infinity)
                 }
+                .font(.caption.bold())
+                .foregroundColor(.secondary)
                 .padding(.vertical, 8)
-                .background(Color.secondary.opacity(0.08))
+                .padding(.horizontal, 12)
 
-                Divider()
+                Divider().gridCellColumns(7)
 
                 // Rows
                 ForEach(projections) { proj in
-                    PlanProjectionRow(projection: proj, isCurrent: proj.plan.id == currentPlanId)
-                    Divider()
+                    let isCurrent = proj.plan.id == currentPlanId
+
+                    GridRow {
+                        // Plan name
+                        HStack(spacing: 4) {
+                            Text(proj.plan.name)
+                                .fontWeight(isCurrent ? .bold : .regular)
+                            if isCurrent {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.caption2)
+                                    .foregroundColor(.accentColor)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                        // Price
+                        Text(proj.plan.monthlyPrice == 0 ? "Free" : "$\(Int(proj.plan.monthlyPrice))")
+                            .frame(maxWidth: .infinity)
+
+                        // Avg 5h
+                        Text("\(Int(proj.projectedAvg5h))%")
+                            .foregroundColor(utilizationColor(proj.projectedAvg5h))
+                            .frame(maxWidth: .infinity)
+
+                        // Avg weekly
+                        Text("\(Int(proj.projectedAvgWeekly))%")
+                            .foregroundColor(utilizationColor(proj.projectedAvgWeekly))
+                            .frame(maxWidth: .infinity)
+
+                        // At 5h limit
+                        Group {
+                            if proj.pctTimeAt5hLimit < 1 {
+                                Text("\u{2014}").foregroundColor(.secondary)
+                            } else {
+                                Text("\(Int(proj.pctTimeAt5hLimit))%").foregroundColor(limitColor(proj.pctTimeAt5hLimit))
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+
+                        // At weekly limit
+                        Group {
+                            if proj.pctTimeAtWeeklyLimit < 1 {
+                                Text("\u{2014}").foregroundColor(.secondary)
+                            } else {
+                                Text("\(Int(proj.pctTimeAtWeeklyLimit))%").foregroundColor(limitColor(proj.pctTimeAtWeeklyLimit))
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+
+                        // Headroom
+                        Text(proj.headroom > 0 ? "+\(Int(proj.headroom))%" : "\(Int(proj.headroom))%")
+                            .foregroundColor(proj.headroom > 20 ? .green : proj.headroom > 5 ? .orange : .red)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .font(.callout.monospacedDigit())
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 12)
+                    .background(isCurrent ? Color.accentColor.opacity(0.04) : Color.clear)
+
+                    Divider().gridCellColumns(7)
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: 10))
@@ -202,85 +262,6 @@ struct PlanProjectionTable: View {
         }
     }
 
-    private func headerCell(_ text: String, width: CGFloat, alignment: Alignment = .center) -> some View {
-        Text(text)
-            .font(.caption.bold())
-            .foregroundColor(.secondary)
-            .frame(width: width, alignment: alignment)
-    }
-}
-
-struct PlanProjectionRow: View {
-    let projection: PlanProjection
-    let isCurrent: Bool
-
-    var body: some View {
-        HStack(spacing: 0) {
-            // Plan name
-            HStack(spacing: 4) {
-                Text(projection.plan.name)
-                    .font(.callout)
-                    .fontWeight(isCurrent ? .bold : .regular)
-                if isCurrent {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.caption2)
-                        .foregroundColor(.accentColor)
-                }
-            }
-            .frame(width: 120, alignment: .leading)
-
-            // Price
-            Text(projection.plan.monthlyPrice == 0 ? "Free" : "$\(Int(projection.plan.monthlyPrice))")
-                .font(.callout.monospacedDigit())
-                .frame(width: 70)
-
-            // Avg 5h utilization
-            utilizationCell(projection.projectedAvg5h, width: 65)
-
-            // Avg weekly utilization
-            utilizationCell(projection.projectedAvgWeekly, width: 65)
-
-            // Time at 5h limit
-            limitCell(projection.pctTimeAt5hLimit, width: 80)
-
-            // Time at weekly limit
-            limitCell(projection.pctTimeAtWeeklyLimit, width: 80)
-
-            // Headroom
-            headroomCell(projection.headroom, width: 75)
-        }
-        .padding(.vertical, 8)
-        .background(isCurrent ? Color.accentColor.opacity(0.04) : Color.clear)
-    }
-
-    private func utilizationCell(_ pct: Double, width: CGFloat) -> some View {
-        Text("\(Int(pct))%")
-            .font(.callout.monospacedDigit())
-            .foregroundColor(utilizationColor(pct))
-            .frame(width: width)
-    }
-
-    private func limitCell(_ pct: Double, width: CGFloat) -> some View {
-        Group {
-            if pct < 1 {
-                Text("\u{2014}")
-                    .foregroundColor(.secondary)
-            } else {
-                Text("\(Int(pct))%")
-                    .foregroundColor(limitColor(pct))
-            }
-        }
-        .font(.callout.monospacedDigit())
-        .frame(width: width)
-    }
-
-    private func headroomCell(_ headroom: Double, width: CGFloat) -> some View {
-        Text(headroom > 0 ? "+\(Int(headroom))%" : "\(Int(headroom))%")
-            .font(.callout.monospacedDigit())
-            .foregroundColor(headroom > 20 ? .green : headroom > 5 ? .orange : .red)
-            .frame(width: width)
-    }
-
     private func utilizationColor(_ pct: Double) -> Color {
         if pct < 50 { return .green }
         if pct < 75 { return .primary }
@@ -289,7 +270,6 @@ struct PlanProjectionRow: View {
     }
 
     private func limitColor(_ pct: Double) -> Color {
-        if pct < 5 { return .orange }
         if pct < 15 { return .orange }
         return .red
     }
