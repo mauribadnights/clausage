@@ -42,7 +42,7 @@ struct MainWindowView: View {
             case .planOptimizer:
                 PlanOptimizerView(pricingService: pricingService)
             case .settings:
-                SettingsView(usageService: usageService)
+                SettingsView(usageService: usageService, updateService: updateService)
             }
         }
     }
