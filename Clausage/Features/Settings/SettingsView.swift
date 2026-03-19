@@ -126,14 +126,29 @@ private struct MenuBarSettingsSection: View {
             VStack(alignment: .leading, spacing: 12) {
                 TimerFormatPicker(settings: settings)
 
-                Toggle("Show usage bars in menu bar", isOn: $settings.showUsageBars)
-                    .toggleStyle(.switch)
-
-                Toggle("Text shadow", isOn: $settings.showTextShadow)
-                    .toggleStyle(.switch)
-
-                Toggle("Show promo timer", isOn: $settings.showPromoTimer)
-                    .toggleStyle(.switch)
+                Grid(alignment: .leading, verticalSpacing: 10) {
+                    GridRow {
+                        Text("Show usage bars")
+                        Spacer()
+                        Toggle("", isOn: $settings.showUsageBars)
+                            .toggleStyle(.switch)
+                            .labelsHidden()
+                    }
+                    GridRow {
+                        Text("Text shadow")
+                        Spacer()
+                        Toggle("", isOn: $settings.showTextShadow)
+                            .toggleStyle(.switch)
+                            .labelsHidden()
+                    }
+                    GridRow {
+                        Text("Show promo timer")
+                        Spacer()
+                        Toggle("", isOn: $settings.showPromoTimer)
+                            .toggleStyle(.switch)
+                            .labelsHidden()
+                    }
+                }
             }
             .padding(8)
         }
