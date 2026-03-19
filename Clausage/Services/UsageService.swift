@@ -30,7 +30,16 @@ final class UsageService {
     private var modelContainer: ModelContainer?
     private var retryTask: Task<Void, Never>?
 
+    private static let cachedUsageKey = "lastSuccessfulUsage"
+
     init() {
+        // Restore last known usage from disk so the user never sees an empty state
+        if let cached = Self.loadCachedUsage() {
+            var restored = cached
+            restored.isStale = true
+            usage = restored
+            lastSuccessfulUsage = cached
+        }
         startRefreshTimer()
         Task { @MainActor in
             self.fetch()
@@ -67,35 +76,37 @@ final class UsageService {
             await MainActor.run { [weak self] in
                 guard let self else { return }
 
+                let isRateLimited = result.error == "Rate limited"
+
                 if result.error != nil {
                     self.consecutiveFailures += 1
 
                     if let lastGood = self.lastSuccessfulUsage {
-                        // Keep showing last good data, mark as stale
                         var stale = lastGood
                         stale.isStale = true
                         self.usage = stale
+                    } else if isRateLimited {
+                        self.usage = UsageData(error: "Waiting for API... (rate limited)")
                     } else {
-                        // No cached data at all — show a helpful message
-                        if result.error == "Rate limited" {
-                            self.usage = UsageData(error: "Waiting for API... (rate limited, retrying)")
-                        } else {
-                            self.usage = result
-                        }
+                        self.usage = result
                     }
 
-                    // Schedule a single retry with backoff
-                    let delay = min(15.0 * pow(2.0, Double(self.consecutiveFailures - 1)), 120.0)
-                    self.retryTask = Task { [weak self] in
-                        try? await Task.sleep(for: .seconds(delay))
-                        guard !Task.isCancelled else { return }
-                        await self?.fetch()
+                    // On rate limit: don't retry — wait for next regular refresh.
+                    // On other errors: retry with backoff.
+                    if !isRateLimited {
+                        let delay = min(15.0 * pow(2.0, Double(self.consecutiveFailures - 1)), 120.0)
+                        self.retryTask = Task { [weak self] in
+                            try? await Task.sleep(for: .seconds(delay))
+                            guard !Task.isCancelled else { return }
+                            await self?.fetch()
+                        }
                     }
                 } else {
                     self.consecutiveFailures = 0
                     self.lastSuccessfulUsage = result
                     self.usage = result
                     self.persistSnapshot(result)
+                    Self.saveCachedUsage(result)
                 }
                 self.isLoading = false
             }
@@ -242,6 +253,41 @@ final class UsageService {
         if let i = value as? Int { return Double(i) }
         if let s = value as? String { return Double(s) }
         return nil
+    }
+
+    // MARK: - Usage cache (survives app restarts)
+
+    private static func saveCachedUsage(_ data: UsageData) {
+        let dict: [String: Any?] = [
+            "fiveHourPercent": data.fiveHourPercent,
+            "weeklyPercent": data.weeklyPercent,
+            "fiveHourResetsAt": data.fiveHourResetsAt?.timeIntervalSince1970,
+            "weeklyResetsAt": data.weeklyResetsAt?.timeIntervalSince1970,
+            "lastUpdated": data.lastUpdated?.timeIntervalSince1970
+        ]
+        UserDefaults.standard.set(dict, forKey: cachedUsageKey)
+    }
+
+    private static func loadCachedUsage() -> UsageData? {
+        guard let dict = UserDefaults.standard.dictionary(forKey: cachedUsageKey) else { return nil }
+
+        var data = UsageData()
+        data.fiveHourPercent = dict["fiveHourPercent"] as? Double
+        data.weeklyPercent = dict["weeklyPercent"] as? Double
+
+        if let ts = dict["fiveHourResetsAt"] as? Double {
+            data.fiveHourResetsAt = Date(timeIntervalSince1970: ts)
+        }
+        if let ts = dict["weeklyResetsAt"] as? Double {
+            data.weeklyResetsAt = Date(timeIntervalSince1970: ts)
+        }
+        if let ts = dict["lastUpdated"] as? Double {
+            data.lastUpdated = Date(timeIntervalSince1970: ts)
+        }
+
+        // Only return if there's actual data
+        guard data.fiveHourPercent != nil || data.weeklyPercent != nil else { return nil }
+        return data
     }
 
     static func resetTimeString(_ date: Date?) -> String {

@@ -139,14 +139,20 @@ struct UsageSection: View {
             }
 
             if let lastUpdated = usageService.usage.lastUpdated {
-                HStack(spacing: 4) {
-                    Text("Updated \(timeAgo(lastUpdated))")
-                    if usageService.usage.isStale {
-                        Text("(refreshing...)")
+                if usageService.usage.isStale {
+                    HStack(spacing: 4) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.system(size: 9))
+                            .foregroundColor(.orange)
+                        Text("Last updated \(timeAgo(lastUpdated)) — unable to refresh")
+                            .font(.system(size: 9))
+                            .foregroundColor(.orange.opacity(0.8))
                     }
+                } else {
+                    Text("Updated \(timeAgo(lastUpdated))")
+                        .font(.system(size: 9))
+                        .foregroundColor(.secondary.opacity(0.7))
                 }
-                .font(.system(size: 9))
-                .foregroundColor(.secondary.opacity(0.7))
             }
         }
     }

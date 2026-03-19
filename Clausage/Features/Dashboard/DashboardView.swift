@@ -50,9 +50,23 @@ struct DashboardView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
 
+                // Stale data warning
+                if usageService.usage.isStale, let lastUpdated = usageService.usage.lastUpdated {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle")
+                        Text("Unable to refresh — showing data from \(lastUpdated.formatted(.relative(presentation: .named)))")
+                            .font(.callout)
+                    }
+                    .foregroundColor(.orange)
+                    .padding()
+                    .frame(maxWidth: .infinity)
+                    .background(.orange.opacity(0.1))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+
                 // Last updated + refresh
                 HStack {
-                    if let lastUpdated = usageService.usage.lastUpdated {
+                    if let lastUpdated = usageService.usage.lastUpdated, !usageService.usage.isStale {
                         Text("Last updated: \(lastUpdated.formatted(.relative(presentation: .named)))")
                             .font(.caption)
                             .foregroundColor(.secondary)
