@@ -148,9 +148,70 @@ private struct MenuBarSettingsSection: View {
                             .toggleStyle(.switch)
                             .labelsHidden()
                     }
+                    GridRow {
+                        Text("Show usage %")
+                        Spacer()
+                        Toggle("", isOn: $settings.showMenuBarPercent)
+                            .toggleStyle(.switch)
+                            .labelsHidden()
+                    }
+                    if settings.showMenuBarPercent {
+                        GridRow {
+                            Text("Usage % source")
+                            Spacer()
+                            Picker("", selection: $settings.menuBarPercentSource) {
+                                Text("5-hour").tag("5hour")
+                                Text("Weekly").tag("weekly")
+                            }
+                            .labelsHidden()
+                            .frame(width: 100)
+                        }
+                    }
                 }
+
+                Divider()
+
+                MenuBarSizeControls(settings: settings)
             }
             .padding(8)
+        }
+    }
+}
+
+private struct MenuBarSizeControls: View {
+    @Bindable var settings: AppSettings
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Sizes")
+                .font(.subheadline.bold())
+
+            Grid(alignment: .leading, verticalSpacing: 8) {
+                GridRow {
+                    Text("Text size")
+                        .frame(width: 80, alignment: .leading)
+                    Slider(value: $settings.menuBarFontSize, in: 8...14, step: 1)
+                    Text("\(Int(settings.menuBarFontSize))pt")
+                        .font(.caption.monospacedDigit())
+                        .frame(width: 30)
+                }
+                GridRow {
+                    Text("Bar width")
+                        .frame(width: 80, alignment: .leading)
+                    Slider(value: $settings.menuBarBarWidth, in: 20...60, step: 2)
+                    Text("\(Int(settings.menuBarBarWidth))px")
+                        .font(.caption.monospacedDigit())
+                        .frame(width: 30)
+                }
+                GridRow {
+                    Text("Bar height")
+                        .frame(width: 80, alignment: .leading)
+                    Slider(value: $settings.menuBarBarHeight, in: 1...5, step: 0.5)
+                    Text("\(String(format: "%.1f", settings.menuBarBarHeight))")
+                        .font(.caption.monospacedDigit())
+                        .frame(width: 30)
+                }
+            }
         }
     }
 }

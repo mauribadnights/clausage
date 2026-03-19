@@ -1,8 +1,14 @@
-# Clausage 🌭
+<p align="center">
+  <img src="screenshots/repo_banner.png" alt="Clausage" width="600">
+</p>
 
-A native macOS app to track your [Claude](https://claude.ai) usage, visualize consumption over time, and get smart plan recommendations.
+<p align="center">
+  A native macOS app to track your <a href="https://claude.ai">Claude</a> usage, visualize consumption over time, and get smart plan recommendations.
+</p>
 
-> *"Clausage"* — Claude + Usage. Also sounds like sausage 🌭 Hence the logo.
+<p align="center">
+  <em>"Clausage" — Claude + Usage. Also sounds like sausage 🌭 Hence the logo.</em>
+</p>
 
 <p align="center">
   <img src="screenshots/menubar.png" width="320" alt="Menu Bar">
