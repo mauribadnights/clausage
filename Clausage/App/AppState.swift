@@ -43,13 +43,21 @@ final class AppState {
         let fmt = settings.timerFormat
         status = PromoSchedule.shared.currentStatus(at: now)
 
-        if settings.showPromoTimer && status != .ended && status != .disabled {
+        let showTimer = settings.showPromoTimer && status != .ended && status != .disabled
+        if showTimer {
             updatePromoState(now: now, fmt: fmt)
         } else {
-            if let fiveHour = usageFiveHour {
+            if settings.showMenuBarPercent, let fiveHour = usageFiveHour {
                 menuBarText = "\(Int(fiveHour))%"
+            } else if !settings.showUsageBars {
+                // No bars and no percent — show something
+                if let fiveHour = usageFiveHour {
+                    menuBarText = "\(Int(fiveHour))%"
+                } else {
+                    menuBarText = "..."
+                }
             } else {
-                menuBarText = "..."
+                menuBarText = "" // Bars-only mode
             }
             statusDescription = "Claude Usage"
             countdownText = ""
@@ -57,8 +65,9 @@ final class AppState {
         }
 
         let showBars = settings.showUsageBars
+        let showText = !menuBarText.isEmpty
         menuBarImage = AppState.makeMenuBarImage(
-            text: menuBarText,
+            text: showText ? menuBarText : nil,
             color: menuBarColor,
             fiveHourPct: showBars ? usageFiveHour : nil,
             weeklyPct: showBars ? usageWeekly : nil
@@ -129,57 +138,76 @@ final class AppState {
     }
 
     static func makeMenuBarImage(
-        text: String,
+        text: String?,
         color: NSColor,
         fiveHourPct: Double? = nil,
         weeklyPct: Double? = nil
     ) -> NSImage {
-        let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .bold)
-
-        var attributes: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: color,
-        ]
-
-        if AppSettings.shared.showTextShadow {
-            let shadow = NSShadow()
-            shadow.shadowColor = NSColor.black.withAlphaComponent(0.6)
-            shadow.shadowOffset = NSSize(width: 0, height: -0.5)
-            shadow.shadowBlurRadius = 1.5
-            attributes[.shadow] = shadow
-        }
-
-        let attributedString = NSAttributedString(string: text, attributes: attributes)
-        let textSize = attributedString.size()
+        let hasBars = fiveHourPct != nil || weeklyPct != nil
+        let hasText = text != nil && !text!.isEmpty
+        let barHeight: CGFloat = 2.5
+        let barSpacing: CGFloat = 1.5
         let padding: CGFloat = 2
 
-        let hasBars = fiveHourPct != nil || weeklyPct != nil
-        let barHeight: CGFloat = 2.5
-        let barSpacing: CGFloat = 2.5
-        let textToBarGap: CGFloat = 0
-        let bottomMargin: CGFloat = 2
-        let barsArea: CGFloat = hasBars ? (barHeight * 2 + barSpacing + textToBarGap + bottomMargin) : 0
+        if hasText {
+            // Text + optional bars mode
+            let font = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .bold)
+            var attributes: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .foregroundColor: color,
+            ]
 
-        let imageWidth = ceil(textSize.width) + padding * 2
-        let imageHeight = ceil(textSize.height) + padding * 2 + barsArea
+            if AppSettings.shared.showTextShadow {
+                let shadow = NSShadow()
+                shadow.shadowColor = NSColor.black.withAlphaComponent(0.6)
+                shadow.shadowOffset = NSSize(width: 0, height: -0.5)
+                shadow.shadowBlurRadius = 1.5
+                attributes[.shadow] = shadow
+            }
 
-        let image = NSImage(size: NSSize(width: imageWidth, height: imageHeight))
-        image.lockFocus()
+            let attributedString = NSAttributedString(string: text!, attributes: attributes)
+            let textSize = attributedString.size()
 
-        attributedString.draw(at: NSPoint(x: padding, y: barsArea + padding))
+            let bottomMargin: CGFloat = 1
+            let textToBarGap: CGFloat = 0.5
+            let barsArea: CGFloat = hasBars ? (barHeight * 2 + barSpacing + textToBarGap + bottomMargin) : 0
 
-        if hasBars {
-            let barWidth = imageWidth - padding * 2
+            let imageWidth = ceil(textSize.width) + padding * 2
+            let imageHeight = ceil(textSize.height) + padding + barsArea
+
+            let image = NSImage(size: NSSize(width: imageWidth, height: imageHeight))
+            image.lockFocus()
+
+            attributedString.draw(at: NSPoint(x: padding, y: barsArea))
+
+            if hasBars {
+                let barWidth = imageWidth - padding * 2
+                let barX = padding
+                drawUsageBar(x: barX, y: bottomMargin + barHeight + barSpacing, width: barWidth, height: barHeight, pct: fiveHourPct)
+                drawUsageBar(x: barX, y: bottomMargin, width: barWidth, height: barHeight, pct: weeklyPct)
+            }
+
+            image.unlockFocus()
+            image.isTemplate = false
+            return image
+        } else {
+            // Bars-only mode — compact, no text
+            let barWidth: CGFloat = 36
+            let totalHeight = barHeight * 2 + barSpacing
+            let imageWidth = barWidth + padding * 2
+            let imageHeight = totalHeight + padding * 2
+
+            let image = NSImage(size: NSSize(width: imageWidth, height: imageHeight))
+            image.lockFocus()
+
             let barX = padding
+            drawUsageBar(x: barX, y: padding + barHeight + barSpacing, width: barWidth, height: barHeight, pct: fiveHourPct)
+            drawUsageBar(x: barX, y: padding, width: barWidth, height: barHeight, pct: weeklyPct)
 
-            let bar1Y: CGFloat = bottomMargin + barHeight + barSpacing
-            drawUsageBar(x: barX, y: bar1Y, width: barWidth, height: barHeight, pct: fiveHourPct)
-            drawUsageBar(x: barX, y: bottomMargin, width: barWidth, height: barHeight, pct: weeklyPct)
+            image.unlockFocus()
+            image.isTemplate = false
+            return image
         }
-
-        image.unlockFocus()
-        image.isTemplate = false
-        return image
     }
 
     private static func drawUsageBar(x: CGFloat, y: CGFloat, width: CGFloat, height: CGFloat, pct: Double?) {

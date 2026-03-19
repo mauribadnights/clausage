@@ -112,6 +112,10 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(currentPlanId, forKey: "currentPlanId") }
     }
 
+    var showMenuBarPercent: Bool {
+        didSet { UserDefaults.standard.set(showMenuBarPercent, forKey: "showMenuBarPercent") }
+    }
+
     var refreshInterval: TimeInterval {
         didSet { UserDefaults.standard.set(refreshInterval, forKey: "refreshInterval") }
     }
@@ -142,6 +146,12 @@ final class AppSettings {
         }
 
         self.currentPlanId = UserDefaults.standard.string(forKey: "currentPlanId") ?? "pro"
+
+        if UserDefaults.standard.object(forKey: "showMenuBarPercent") == nil {
+            self.showMenuBarPercent = false
+        } else {
+            self.showMenuBarPercent = UserDefaults.standard.bool(forKey: "showMenuBarPercent")
+        }
 
         if UserDefaults.standard.object(forKey: "refreshInterval") == nil {
             self.refreshInterval = 300

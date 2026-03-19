@@ -148,6 +148,13 @@ private struct MenuBarSettingsSection: View {
                             .toggleStyle(.switch)
                             .labelsHidden()
                     }
+                    GridRow {
+                        Text("Show usage % in menu bar")
+                        Spacer()
+                        Toggle("", isOn: $settings.showMenuBarPercent)
+                            .toggleStyle(.switch)
+                            .labelsHidden()
+                    }
                 }
             }
             .padding(8)
