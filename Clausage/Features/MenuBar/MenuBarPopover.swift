@@ -45,9 +45,9 @@ struct MenuBarPopover: View {
 
             HStack {
                 Button("Open Clausage") {
-                    dismiss()
                     openWindow(id: "main")
                     NSApp.activate(ignoringOtherApps: true)
+                    dismiss()
                 }
                 .buttonStyle(.plain)
                 .font(.system(size: 12, weight: .medium))
@@ -56,9 +56,9 @@ struct MenuBarPopover: View {
                 Spacer()
 
                 Button(action: {
-                    dismiss()
                     openWindow(id: "main")
                     NSApp.activate(ignoringOtherApps: true)
+                    dismiss()
                 }) {
                     Image(systemName: "gear")
                         .font(.system(size: 12))
