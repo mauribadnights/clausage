@@ -6,20 +6,37 @@ APP_BUNDLE="$APP_NAME.app"
 BUILD_DIR=".build/release"
 ASSETS_DIR="$APP_NAME/Resources/Assets.xcassets"
 
-echo "Building $APP_NAME..."
-swift build -c release
+echo "Building $APP_NAME (universal binary)..."
+swift build -c release --arch arm64
+swift build -c release --arch x86_64
 
 echo "Creating app bundle..."
 rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources"
 
-# Copy binary
-cp "$BUILD_DIR/$APP_NAME" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
+# Create universal binary with lipo
+ARM_BIN=".build/arm64-apple-macosx/release/$APP_NAME"
+X86_BIN=".build/x86_64-apple-macosx/release/$APP_NAME"
+if [ -f "$ARM_BIN" ] && [ -f "$X86_BIN" ]; then
+    lipo -create "$ARM_BIN" "$X86_BIN" -output "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
+    echo "Created universal binary (arm64 + x86_64)"
+else
+    # Fallback to whatever arch was built
+    cp "$BUILD_DIR/$APP_NAME" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
+    echo "Warning: single-arch binary only"
+fi
 
 # Copy SPM resource bundle (pricing.json, etc.)
-RESOURCE_BUNDLE="$BUILD_DIR/${APP_NAME}_${APP_NAME}.bundle"
-if [ -d "$RESOURCE_BUNDLE" ]; then
+# Check both arch-specific and default locations
+RESOURCE_BUNDLE=""
+for dir in ".build/arm64-apple-macosx/release" "$BUILD_DIR"; do
+    if [ -d "$dir/${APP_NAME}_${APP_NAME}.bundle" ]; then
+        RESOURCE_BUNDLE="$dir/${APP_NAME}_${APP_NAME}.bundle"
+        break
+    fi
+done
+if [ -n "$RESOURCE_BUNDLE" ]; then
     cp -R "$RESOURCE_BUNDLE" "$APP_BUNDLE/Contents/Resources/"
     echo "Copied resource bundle"
 fi
