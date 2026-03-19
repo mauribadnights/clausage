@@ -17,6 +17,13 @@ mkdir -p "$APP_BUNDLE/Contents/Resources"
 # Copy binary
 cp "$BUILD_DIR/$APP_NAME" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 
+# Copy SPM resource bundle (pricing.json, etc.)
+RESOURCE_BUNDLE="$BUILD_DIR/${APP_NAME}_${APP_NAME}.bundle"
+if [ -d "$RESOURCE_BUNDLE" ]; then
+    cp -R "$RESOURCE_BUNDLE" "$APP_BUNDLE/Contents/Resources/"
+    echo "Copied resource bundle"
+fi
+
 # Copy Info.plist and inject version from latest git tag
 cp "$APP_NAME/Info.plist" "$APP_BUNDLE/Contents/"
 GIT_VERSION=$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')

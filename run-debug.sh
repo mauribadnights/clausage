@@ -16,6 +16,12 @@ mkdir -p "$APP_BUNDLE/Contents/Resources"
 cp "$BUILD_DIR/$APP_NAME" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 cp "$APP_NAME/Info.plist" "$APP_BUNDLE/Contents/"
 
+# Copy SPM resource bundle
+RESOURCE_BUNDLE="$BUILD_DIR/${APP_NAME}_${APP_NAME}.bundle"
+if [ -d "$RESOURCE_BUNDLE" ]; then
+    cp -R "$RESOURCE_BUNDLE" "$APP_BUNDLE/Contents/Resources/"
+fi
+
 # Compile asset catalog
 ASSETS_DIR="$APP_NAME/Resources/Assets.xcassets"
 if [ -d "$ASSETS_DIR" ]; then

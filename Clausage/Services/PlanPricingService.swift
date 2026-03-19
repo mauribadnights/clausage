@@ -12,8 +12,18 @@ final class PlanPricingService {
         fetchRemote()
     }
 
+    private static func findResourceBundle() -> Bundle {
+        // In .app distribution: SPM resource bundle is at Contents/Resources/Clausage_Clausage.bundle
+        if let bundlePath = Bundle.main.path(forResource: "Clausage_Clausage", ofType: "bundle"),
+           let bundle = Bundle(path: bundlePath) {
+            return bundle
+        }
+        // In SPM dev builds: Bundle.module works directly
+        return Bundle.module
+    }
+
     private func loadBundled() {
-        let url = Bundle.module.url(forResource: "pricing", withExtension: "json")
+        let url = Self.findResourceBundle().url(forResource: "pricing", withExtension: "json")
             ?? Bundle.main.url(forResource: "pricing", withExtension: "json")
 
         guard let url,
