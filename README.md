@@ -34,14 +34,11 @@ Grab the latest `Clausage.app.zip` from [Releases](https://github.com/mauribadni
 2. Move `Clausage.app` to `/Applications`
 3. Launch — it appears in your menu bar
 
-> **macOS security warning:** Since Clausage isn't code-signed with an Apple Developer certificate yet, macOS will block it on first launch. To fix this:
->
-> **Option A (GUI):** Right-click `Clausage.app` → click **Open** → click **Open** again in the dialog. You only need to do this once.
->
-> **Option B (Terminal):**
+> **macOS security warning:** Since Clausage isn't code-signed yet, macOS may show "app is damaged" or a Gatekeeper warning. To fix this, run once in Terminal:
 > ```bash
 > xattr -rd com.apple.quarantine /Applications/Clausage.app
 > ```
+> Then open it normally. Alternatively: right-click the app → **Open** → **Open** in the dialog.
 
 ### Build from Source
 
