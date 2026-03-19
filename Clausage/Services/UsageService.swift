@@ -197,6 +197,26 @@ final class UsageService {
         }
 
         if httpStatusCode == 429 {
+            // Token may have been rotated — try a fresh one before giving up
+            if let freshToken = KeychainService.refreshToken() {
+                request.setValue("Bearer \(freshToken)", forHTTPHeaderField: "Authorization")
+
+                let retrySemaphore = DispatchSemaphore(value: 0)
+                var retryData: Data?
+                var retryError: Error?
+                var retryStatus: Int?
+                URLSession.shared.dataTask(with: request) { data, response, error in
+                    retryData = data
+                    retryError = error
+                    retryStatus = (response as? HTTPURLResponse)?.statusCode
+                    retrySemaphore.signal()
+                }.resume()
+                retrySemaphore.wait()
+
+                if retryError == nil, retryStatus == 200, let data = retryData {
+                    return parseResponse(data)
+                }
+            }
             return UsageData(error: "Rate limited")
         }
 
