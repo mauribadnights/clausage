@@ -67,29 +67,30 @@ final class UsageService {
             await MainActor.run { [weak self] in
                 guard let self else { return }
 
+                let isRateLimited = result.error == "Rate limited"
+
                 if result.error != nil {
                     self.consecutiveFailures += 1
 
                     if let lastGood = self.lastSuccessfulUsage {
-                        // Keep showing last good data, mark as stale
                         var stale = lastGood
                         stale.isStale = true
                         self.usage = stale
+                    } else if isRateLimited {
+                        self.usage = UsageData(error: "Waiting for API... (rate limited)")
                     } else {
-                        // No cached data at all — show a helpful message
-                        if result.error == "Rate limited" {
-                            self.usage = UsageData(error: "Waiting for API... (rate limited, retrying)")
-                        } else {
-                            self.usage = result
-                        }
+                        self.usage = result
                     }
 
-                    // Schedule a single retry with backoff
-                    let delay = min(15.0 * pow(2.0, Double(self.consecutiveFailures - 1)), 120.0)
-                    self.retryTask = Task { [weak self] in
-                        try? await Task.sleep(for: .seconds(delay))
-                        guard !Task.isCancelled else { return }
-                        await self?.fetch()
+                    // On rate limit: don't retry — wait for next regular refresh.
+                    // On other errors: retry with backoff.
+                    if !isRateLimited {
+                        let delay = min(15.0 * pow(2.0, Double(self.consecutiveFailures - 1)), 120.0)
+                        self.retryTask = Task { [weak self] in
+                            try? await Task.sleep(for: .seconds(delay))
+                            guard !Task.isCancelled else { return }
+                            await self?.fetch()
+                        }
                     }
                 } else {
                     self.consecutiveFailures = 0
