@@ -47,12 +47,13 @@ final class AppState {
         if showTimer {
             updatePromoState(now: now, fmt: fmt)
         } else {
-            if settings.showMenuBarPercent, let fiveHour = usageFiveHour {
-                menuBarText = "\(Int(fiveHour))%"
+            let percentValue: Double? = settings.menuBarPercentSource == "weekly" ? usageWeekly : usageFiveHour
+            if settings.showMenuBarPercent, let pct = percentValue {
+                menuBarText = "\(Int(pct))%"
             } else if !settings.showUsageBars {
                 // No bars and no percent — show something
-                if let fiveHour = usageFiveHour {
-                    menuBarText = "\(Int(fiveHour))%"
+                if let pct = percentValue ?? usageFiveHour {
+                    menuBarText = "\(Int(pct))%"
                 } else {
                     menuBarText = "..."
                 }
@@ -143,15 +144,16 @@ final class AppState {
         fiveHourPct: Double? = nil,
         weeklyPct: Double? = nil
     ) -> NSImage {
+        let settings = AppSettings.shared
         let hasBars = fiveHourPct != nil || weeklyPct != nil
         let hasText = text != nil && !text!.isEmpty
-        let barHeight: CGFloat = 2.5
-        let barSpacing: CGFloat = 1.5
+        let barHeight: CGFloat = settings.menuBarBarHeight
+        let barSpacing: CGFloat = max(1, barHeight * 0.6)
         let padding: CGFloat = 2
 
         if hasText {
             // Text + optional bars mode
-            let font = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .bold)
+            let font = NSFont.monospacedDigitSystemFont(ofSize: settings.menuBarFontSize, weight: .bold)
             var attributes: [NSAttributedString.Key: Any] = [
                 .font: font,
                 .foregroundColor: color,
@@ -192,7 +194,7 @@ final class AppState {
             return image
         } else {
             // Bars-only mode — compact, no text
-            let barWidth: CGFloat = 36
+            let barWidth: CGFloat = settings.menuBarBarWidth
             let totalHeight = barHeight * 2 + barSpacing
             let imageWidth = barWidth + padding * 2
             let imageHeight = totalHeight + padding * 2

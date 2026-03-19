@@ -116,6 +116,26 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(showMenuBarPercent, forKey: "showMenuBarPercent") }
     }
 
+    /// Which usage to show as % in menu bar: "5hour" or "weekly"
+    var menuBarPercentSource: String {
+        didSet { UserDefaults.standard.set(menuBarPercentSource, forKey: "menuBarPercentSource") }
+    }
+
+    /// Font size for timer/percent text in menu bar (8-14)
+    var menuBarFontSize: Double {
+        didSet { UserDefaults.standard.set(menuBarFontSize, forKey: "menuBarFontSize") }
+    }
+
+    /// Bar width in bars-only mode (20-60)
+    var menuBarBarWidth: Double {
+        didSet { UserDefaults.standard.set(menuBarBarWidth, forKey: "menuBarBarWidth") }
+    }
+
+    /// Bar height (1-5)
+    var menuBarBarHeight: Double {
+        didSet { UserDefaults.standard.set(menuBarBarHeight, forKey: "menuBarBarHeight") }
+    }
+
     var refreshInterval: TimeInterval {
         didSet { UserDefaults.standard.set(refreshInterval, forKey: "refreshInterval") }
     }
@@ -151,6 +171,26 @@ final class AppSettings {
             self.showMenuBarPercent = false
         } else {
             self.showMenuBarPercent = UserDefaults.standard.bool(forKey: "showMenuBarPercent")
+        }
+
+        self.menuBarPercentSource = UserDefaults.standard.string(forKey: "menuBarPercentSource") ?? "5hour"
+
+        if UserDefaults.standard.object(forKey: "menuBarFontSize") == nil {
+            self.menuBarFontSize = 10
+        } else {
+            self.menuBarFontSize = UserDefaults.standard.double(forKey: "menuBarFontSize")
+        }
+
+        if UserDefaults.standard.object(forKey: "menuBarBarWidth") == nil {
+            self.menuBarBarWidth = 36
+        } else {
+            self.menuBarBarWidth = UserDefaults.standard.double(forKey: "menuBarBarWidth")
+        }
+
+        if UserDefaults.standard.object(forKey: "menuBarBarHeight") == nil {
+            self.menuBarBarHeight = 2.5
+        } else {
+            self.menuBarBarHeight = UserDefaults.standard.double(forKey: "menuBarBarHeight")
         }
 
         if UserDefaults.standard.object(forKey: "refreshInterval") == nil {
