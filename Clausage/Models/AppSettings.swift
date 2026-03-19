@@ -105,7 +105,10 @@ final class AppSettings {
     }
 
     var showPromoTimer: Bool {
-        didSet { UserDefaults.standard.set(showPromoTimer, forKey: "showPromoTimer") }
+        didSet {
+            UserDefaults.standard.set(showPromoTimer, forKey: "showPromoTimer")
+            if showPromoTimer { showMenuBarPercent = false }
+        }
     }
 
     var currentPlanId: String {
@@ -113,7 +116,10 @@ final class AppSettings {
     }
 
     var showMenuBarPercent: Bool {
-        didSet { UserDefaults.standard.set(showMenuBarPercent, forKey: "showMenuBarPercent") }
+        didSet {
+            UserDefaults.standard.set(showMenuBarPercent, forKey: "showMenuBarPercent")
+            if showMenuBarPercent { showPromoTimer = false }
+        }
     }
 
     /// Which usage to show as % in menu bar: "5hour" or "weekly"
