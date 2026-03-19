@@ -30,7 +30,16 @@ final class UsageService {
     private var modelContainer: ModelContainer?
     private var retryTask: Task<Void, Never>?
 
+    private static let cachedUsageKey = "lastSuccessfulUsage"
+
     init() {
+        // Restore last known usage from disk so the user never sees an empty state
+        if let cached = Self.loadCachedUsage() {
+            var restored = cached
+            restored.isStale = true
+            usage = restored
+            lastSuccessfulUsage = cached
+        }
         startRefreshTimer()
         Task { @MainActor in
             self.fetch()
@@ -97,6 +106,7 @@ final class UsageService {
                     self.lastSuccessfulUsage = result
                     self.usage = result
                     self.persistSnapshot(result)
+                    Self.saveCachedUsage(result)
                 }
                 self.isLoading = false
             }
@@ -243,6 +253,41 @@ final class UsageService {
         if let i = value as? Int { return Double(i) }
         if let s = value as? String { return Double(s) }
         return nil
+    }
+
+    // MARK: - Usage cache (survives app restarts)
+
+    private static func saveCachedUsage(_ data: UsageData) {
+        let dict: [String: Any?] = [
+            "fiveHourPercent": data.fiveHourPercent,
+            "weeklyPercent": data.weeklyPercent,
+            "fiveHourResetsAt": data.fiveHourResetsAt?.timeIntervalSince1970,
+            "weeklyResetsAt": data.weeklyResetsAt?.timeIntervalSince1970,
+            "lastUpdated": data.lastUpdated?.timeIntervalSince1970
+        ]
+        UserDefaults.standard.set(dict, forKey: cachedUsageKey)
+    }
+
+    private static func loadCachedUsage() -> UsageData? {
+        guard let dict = UserDefaults.standard.dictionary(forKey: cachedUsageKey) else { return nil }
+
+        var data = UsageData()
+        data.fiveHourPercent = dict["fiveHourPercent"] as? Double
+        data.weeklyPercent = dict["weeklyPercent"] as? Double
+
+        if let ts = dict["fiveHourResetsAt"] as? Double {
+            data.fiveHourResetsAt = Date(timeIntervalSince1970: ts)
+        }
+        if let ts = dict["weeklyResetsAt"] as? Double {
+            data.weeklyResetsAt = Date(timeIntervalSince1970: ts)
+        }
+        if let ts = dict["lastUpdated"] as? Double {
+            data.lastUpdated = Date(timeIntervalSince1970: ts)
+        }
+
+        // Only return if there's actual data
+        guard data.fiveHourPercent != nil || data.weeklyPercent != nil else { return nil }
+        return data
     }
 
     static func resetTimeString(_ date: Date?) -> String {
