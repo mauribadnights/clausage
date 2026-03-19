@@ -26,7 +26,12 @@ jobs:
         run: bash build.sh
 
       - name: Create zip archive
-        run: zip -r Clausage.app.zip Clausage.app
+        run: |
+          # Remove any quarantine flags before zipping so users don't get
+          # "damaged and can't be opened" errors on download
+          xattr -cr Clausage.app
+          # Use ditto instead of zip — preserves macOS metadata correctly
+          ditto -c -k --keepParent Clausage.app Clausage.app.zip
 
       - name: Extract tag changelog
         id: changelog
