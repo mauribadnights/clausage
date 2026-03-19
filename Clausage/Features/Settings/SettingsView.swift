@@ -3,6 +3,7 @@ import SwiftData
 
 struct SettingsView: View {
     let usageService: UsageService
+    let updateService: UpdateService
     @Bindable private var settings = AppSettings.shared
 
     var body: some View {
@@ -14,7 +15,7 @@ struct SettingsView: View {
                 #if DEBUG
                 DebugSection()
                 #endif
-                AboutSection()
+                AboutSection(updateService: updateService)
             }
             .padding(24)
         }
@@ -337,9 +338,11 @@ private struct DataSettingsSection: View {
 }
 
 private struct AboutSection: View {
+    let updateService: UpdateService
+
     var body: some View {
         GroupBox("About") {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     Text("Clausage")
                         .font(.subheadline.bold())
@@ -351,6 +354,52 @@ private struct AboutSection: View {
                 Text("Track your Claude usage, get plan recommendations, and never miss a promo.")
                     .font(.caption)
                     .foregroundColor(.secondary)
+
+                Divider()
+
+                HStack {
+                    if let newVersion = updateService.updateAvailable {
+                        Label("v\(newVersion) available", systemImage: "arrow.down.circle.fill")
+                            .font(.caption)
+                            .foregroundColor(.green)
+                        Spacer()
+                        Button {
+                            updateService.performUpdate()
+                        } label: {
+                            if updateService.isUpdating {
+                                ProgressView()
+                                    .controlSize(.small)
+                                Text("Updating...")
+                            } else {
+                                Text("Update Now")
+                            }
+                        }
+                        .disabled(updateService.isUpdating)
+                    } else {
+                        if updateService.isChecking {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Checking...")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        } else {
+                            Label("Up to date", systemImage: "checkmark.circle")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        Button("Check for Updates") {
+                            updateService.checkForUpdate()
+                        }
+                        .disabled(updateService.isChecking)
+                    }
+                }
+
+                if let error = updateService.updateError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundColor(.red)
+                }
             }
             .padding(8)
         }
