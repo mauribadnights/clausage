@@ -63,7 +63,7 @@ final class PlanPricingService {
         }
     }
 
-    /// Analyze usage and produce per-plan projections
+    /// Analyze usage and produce per-plan projections using peak-at-reset detection
     func analyzePlans(
         snapshots: [UsageSnapshot],
         currentPlanId: String
@@ -71,31 +71,39 @@ final class PlanPricingService {
         guard let pricing = pricing else { return nil }
         guard let currentPlan = pricing.plans.first(where: { $0.id == currentPlanId }) else { return nil }
 
-        guard snapshots.count >= 10 else {
+        let sorted = snapshots.sorted(by: { $0.timestamp < $1.timestamp })
+
+        guard sorted.count >= 10 else {
             return PlanAnalysis(
                 currentPlan: currentPlan,
                 projections: [],
                 insight: "Need more usage data for analysis. Keep using Claude and check back later.",
-                dataPoints: snapshots.count,
-                dataDays: 0
+                dataPoints: sorted.count,
+                dataDays: 0,
+                fiveHourCycles: 0,
+                weeklyCycles: 0
             )
         }
 
-        // Use recent data (last 7 days, or all if less)
-        let weekAgo = Date().addingTimeInterval(-7 * 24 * 3600)
-        let recent = snapshots.filter { $0.timestamp > weekAgo }
-        let analyzed: [UsageSnapshot] = recent.isEmpty ? Array(snapshots.suffix(200)) : recent
-
         let dataDays: Double
-        if let first = analyzed.first, let last = analyzed.last {
+        if let first = sorted.first, let last = sorted.last {
             dataDays = max(1, last.timestamp.timeIntervalSince(first.timestamp) / 86400)
         } else {
             dataDays = 1
         }
 
+        // Extract end-of-window peaks using reset detection
+        let peaks5h = extractWindowPeaks(from: sorted, window: .fiveHour)
+        let peaksWeekly = extractWindowPeaks(from: sorted, window: .weekly)
+
         // Compute projections for each plan
         let projections: [PlanProjection] = pricing.plans.map { plan in
-            projectPlan(plan, from: analyzed, currentMultiplier: currentPlan.usageMultiplier)
+            projectPlan(
+                plan,
+                peaks5h: peaks5h,
+                peaksWeekly: peaksWeekly,
+                currentMultiplier: currentPlan.usageMultiplier
+            )
         }
 
         // Generate insight text
@@ -110,47 +118,107 @@ final class PlanPricingService {
             currentPlan: currentPlan,
             projections: projections,
             insight: insight,
-            dataPoints: analyzed.count,
-            dataDays: Int(dataDays)
+            dataPoints: sorted.count,
+            dataDays: Int(dataDays),
+            fiveHourCycles: peaks5h.count,
+            weeklyCycles: peaksWeekly.count
         )
     }
 
+    // MARK: - Peak Detection
+
+    enum WindowType {
+        case fiveHour, weekly
+    }
+
+    /// Detect window resets and extract the peak utilization before each reset.
+    /// Uses the stored `resetsAt` timestamp to determine if a reset occurred between
+    /// consecutive snapshots. When the laptop is closed during a reset, the last
+    /// snapshot before the gap is used as the end-of-window value.
+    func extractWindowPeaks(from snapshots: [UsageSnapshot], window: WindowType) -> [Double] {
+        guard snapshots.count >= 2 else { return [] }
+
+        var peaks: [Double] = []
+
+        for i in 0..<(snapshots.count - 1) {
+            let current = snapshots[i]
+            let next = snapshots[i + 1]
+
+            let currentPercent: Double
+            let nextPercent: Double
+            let currentResetsAt: Date?
+
+            switch window {
+            case .fiveHour:
+                currentPercent = current.fiveHourPercent
+                nextPercent = next.fiveHourPercent
+                currentResetsAt = current.fiveHourResetsAt
+            case .weekly:
+                currentPercent = current.weeklyPercent
+                nextPercent = next.weeklyPercent
+                currentResetsAt = current.weeklyResetsAt
+            }
+
+            // Method 1: Known reset time — resetsAt falls between current and next snapshot
+            if let resetTime = currentResetsAt,
+               resetTime > current.timestamp,
+               resetTime <= next.timestamp {
+                peaks.append(currentPercent)
+                continue
+            }
+
+            // Method 2: Fallback — detect reset by significant usage drop without a known reset time
+            // This handles cases where resetsAt wasn't available in older snapshots
+            if currentPercent > 10 && nextPercent < currentPercent * 0.4 {
+                peaks.append(currentPercent)
+            }
+        }
+
+        return peaks
+    }
+
+    // MARK: - Projection
+
     private func projectPlan(
         _ plan: PlanTier,
-        from snapshots: [UsageSnapshot],
+        peaks5h: [Double],
+        peaksWeekly: [Double],
         currentMultiplier: Double
     ) -> PlanProjection {
         let scale = currentMultiplier / plan.usageMultiplier
 
-        // Project what utilization would look like on this plan
-        let projected5h = snapshots.map { min($0.fiveHourPercent * scale, 100) }
-        let projectedWeekly = snapshots.map { min($0.weeklyPercent * scale, 100) }
+        // Project peaks onto this plan's capacity
+        let projected5h = peaks5h.map { $0 * scale }
+        let projectedWeekly = peaksWeekly.map { $0 * scale }
 
-        let avg5h = projected5h.reduce(0, +) / Double(max(projected5h.count, 1))
-        let avgWeekly = projectedWeekly.reduce(0, +) / Double(max(projectedWeekly.count, 1))
+        let avgPeak5h = projected5h.isEmpty ? 0 : projected5h.reduce(0, +) / Double(projected5h.count)
+        let avgPeakWeekly = projectedWeekly.isEmpty ? 0 : projectedWeekly.reduce(0, +) / Double(projectedWeekly.count)
 
-        let pctAt5hLimit = Double(projected5h.filter { $0 >= 95 }.count) / Double(max(snapshots.count, 1)) * 100
-        let pctAtWeeklyLimit = Double(projectedWeekly.filter { $0 >= 95 }.count) / Double(max(snapshots.count, 1)) * 100
+        let maxPeak5h = projected5h.max() ?? 0
+        let maxPeakWeekly = projectedWeekly.max() ?? 0
 
-        // Overflow: how much over 100% the raw (unclamped) projection goes
-        let rawProjected5h = snapshots.map { $0.fiveHourPercent * scale }
-        let overflowSamples = rawProjected5h.filter { $0 > 100 }
-        let avgOverflow = overflowSamples.isEmpty ? 0 : overflowSamples.map { $0 - 100 }.reduce(0, +) / Double(overflowSamples.count)
+        let cyclesOver5h = projected5h.filter { $0 > 100 }.count
+        let cyclesOverWeekly = projectedWeekly.filter { $0 > 100 }.count
 
-        // Headroom: how much capacity is left (negative = over limit)
-        let headroom5h = 100 - avg5h
-        let headroomWeekly = 100 - avgWeekly
+        // Headroom based on average peaks (negative = over capacity)
+        let headroom5h = 100 - avgPeak5h
+        let headroomWeekly = 100 - avgPeakWeekly
 
         return PlanProjection(
             plan: plan,
-            projectedAvg5h: avg5h,
-            projectedAvgWeekly: avgWeekly,
-            pctTimeAt5hLimit: pctAt5hLimit,
-            pctTimeAtWeeklyLimit: pctAtWeeklyLimit,
-            avgOverflowPct: avgOverflow,
+            avgPeak5h: avgPeak5h,
+            avgPeakWeekly: avgPeakWeekly,
+            maxPeak5h: maxPeak5h,
+            maxPeakWeekly: maxPeakWeekly,
+            cyclesOver5h: cyclesOver5h,
+            cyclesOverWeekly: cyclesOverWeekly,
+            total5hCycles: peaks5h.count,
+            totalWeeklyCycles: peaksWeekly.count,
             headroom: min(headroom5h, headroomWeekly)
         )
     }
+
+    // MARK: - Insight Generation
 
     private func generateInsight(
         currentPlan: PlanTier,
@@ -161,38 +229,55 @@ final class PlanPricingService {
             return "Unable to analyze current plan usage."
         }
 
+        // Need at least some detected cycles to give meaningful advice
+        if current.total5hCycles == 0 && current.totalWeeklyCycles == 0 {
+            return "Not enough window resets detected yet. Keep using Claude — the optimizer will improve as more data accumulates."
+        }
+
         var parts: [String] = []
 
-        // Current usage summary
-        let avgStr = "You use about \(Int(current.projectedAvg5h))% of your \(currentPlan.name) plan's 5-hour window on average"
-
-        if current.pctTimeAt5hLimit > 0 {
-            parts.append("\(avgStr), and are at the limit \(formatPct(current.pctTimeAt5hLimit)) of the time.")
-        } else {
-            parts.append("\(avgStr).")
+        // Current usage summary based on peaks
+        if current.total5hCycles > 0 {
+            let peakStr = "By end of each 5-hour window, you typically use \(Int(current.avgPeak5h))% of your \(currentPlan.name) plan's capacity"
+            if current.cyclesOver5h > 0 {
+                let pctOver = Double(current.cyclesOver5h) / Double(current.total5hCycles) * 100
+                parts.append("\(peakStr), exceeding the limit in \(formatPct(pctOver)) of windows.")
+            } else {
+                parts.append("\(peakStr).")
+            }
         }
 
-        if current.pctTimeAtWeeklyLimit > 0 {
-            parts.append("You hit the weekly limit \(formatPct(current.pctTimeAtWeeklyLimit)) of the time.")
+        if current.totalWeeklyCycles > 0 && current.cyclesOverWeekly > 0 {
+            let pctOver = Double(current.cyclesOverWeekly) / Double(current.totalWeeklyCycles) * 100
+            parts.append("You exceed the weekly limit in \(formatPct(pctOver)) of weeks.")
         }
 
-        // Find the cheapest plan with < 5% time at limit
+        // Find the cheapest plan where < 10% of cycles exceed capacity
         let affordable = allProjections
-            .filter { $0.pctTimeAt5hLimit < 5 && $0.pctTimeAtWeeklyLimit < 5 }
+            .filter { projection in
+                let pctOver5h = projection.total5hCycles > 0
+                    ? Double(projection.cyclesOver5h) / Double(projection.total5hCycles)
+                    : 0
+                let pctOverWeekly = projection.totalWeeklyCycles > 0
+                    ? Double(projection.cyclesOverWeekly) / Double(projection.totalWeeklyCycles)
+                    : 0
+                return pctOver5h < 0.1 && pctOverWeekly < 0.1
+            }
             .sorted(by: { $0.plan.monthlyPrice < $1.plan.monthlyPrice })
 
         if let bestFit = affordable.first, bestFit.plan.id != currentPlan.id {
             let priceDiff = bestFit.plan.monthlyPrice - currentPlan.monthlyPrice
             if priceDiff < 0 {
-                parts.append("You could save $\(Int(abs(priceDiff)))/mo by switching to \(bestFit.plan.name) and still rarely hit limits.")
-            } else if priceDiff > 0 && (current.pctTimeAt5hLimit > 5 || current.pctTimeAtWeeklyLimit > 5) {
-                parts.append("\(bestFit.plan.name) ($\(Int(priceDiff))/mo more) would keep you under limits almost all the time.")
+                parts.append("You could save $\(Int(abs(priceDiff)))/mo by switching to \(bestFit.plan.name) — you'd still rarely exceed limits.")
+            } else if priceDiff > 0 && (current.cyclesOver5h > 0 || current.cyclesOverWeekly > 0) {
+                parts.append("\(bestFit.plan.name) ($\(Int(priceDiff))/mo more) would keep you under limits in nearly all windows.")
             }
         }
 
-        // If hitting limits on current plan, add supplementation note
-        if current.pctTimeAt5hLimit > 10 && current.avgOverflowPct > 5 {
-            parts.append("During rate-limited periods, you'd need roughly \(Int(current.avgOverflowPct))% more capacity than your plan provides. Compare the cost of upgrading vs. supplementing with API tokens for those periods.")
+        // Worst-case note
+        if current.maxPeak5h > 100 {
+            let overBy = Int(current.maxPeak5h - 100)
+            parts.append("Your heaviest 5-hour window exceeded capacity by \(overBy)% — consider whether API tokens could cover those spikes.")
         }
 
         return parts.joined(separator: " ")
@@ -212,15 +297,20 @@ struct PlanAnalysis {
     let insight: String
     let dataPoints: Int
     let dataDays: Int
+    let fiveHourCycles: Int
+    let weeklyCycles: Int
 }
 
 struct PlanProjection: Identifiable {
     var id: String { plan.id }
     let plan: PlanTier
-    let projectedAvg5h: Double        // Average 5h utilization on this plan
-    let projectedAvgWeekly: Double     // Average weekly utilization on this plan
-    let pctTimeAt5hLimit: Double       // % of time at 5h limit
-    let pctTimeAtWeeklyLimit: Double   // % of time at weekly limit
-    let avgOverflowPct: Double         // When over limit, avg % over
-    let headroom: Double               // Min headroom across both windows
+    let avgPeak5h: Double           // Avg end-of-window 5h utilization on this plan
+    let avgPeakWeekly: Double       // Avg end-of-window weekly utilization on this plan
+    let maxPeak5h: Double           // Worst-case 5h window
+    let maxPeakWeekly: Double       // Worst-case weekly window
+    let cyclesOver5h: Int           // 5h windows that would exceed 100%
+    let cyclesOverWeekly: Int       // Weekly windows that would exceed 100%
+    let total5hCycles: Int          // Total 5h cycles detected
+    let totalWeeklyCycles: Int      // Total weekly cycles detected
+    let headroom: Double            // Min headroom based on avg peaks (negative = over)
 }

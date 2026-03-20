@@ -30,7 +30,9 @@ struct PlanOptimizerView: View {
                         InsightCard(
                             insight: analysis.insight,
                             dataPoints: analysis.dataPoints,
-                            dataDays: analysis.dataDays
+                            dataDays: analysis.dataDays,
+                            fiveHourCycles: analysis.fiveHourCycles,
+                            weeklyCycles: analysis.weeklyCycles
                         )
                     }
 
@@ -137,6 +139,8 @@ struct InsightCard: View {
     let insight: String
     let dataPoints: Int
     let dataDays: Int
+    let fiveHourCycles: Int
+    let weeklyCycles: Int
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -146,7 +150,7 @@ struct InsightCard: View {
                 Text("Analysis")
                     .font(.headline)
                 Spacer()
-                Text("\(dataPoints) samples over \(dataDays)d")
+                Text("\(dataPoints) samples, \(fiveHourCycles) 5h / \(weeklyCycles) wk cycles over \(dataDays)d")
                     .font(.caption2)
                     .foregroundColor(.secondary)
             }
@@ -172,15 +176,19 @@ struct PlanProjectionTable: View {
             Text("Plan Comparison")
                 .font(.headline)
 
+            Text("Based on your actual end-of-window usage — how much capacity you consume before each reset.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+
             Grid(alignment: .center, horizontalSpacing: 0, verticalSpacing: 0) {
                 // Header
                 GridRow {
                     Text("Plan").frame(maxWidth: .infinity, alignment: .leading)
                     Text("Price").frame(maxWidth: .infinity)
-                    Text("Avg 5h").frame(maxWidth: .infinity)
-                    Text("Avg Wk").frame(maxWidth: .infinity)
-                    Text("At 5h Limit").frame(maxWidth: .infinity)
-                    Text("At Wk Limit").frame(maxWidth: .infinity)
+                    Text("Typical 5h").frame(maxWidth: .infinity)
+                    Text("Typical Wk").frame(maxWidth: .infinity)
+                    Text("Peak 5h").frame(maxWidth: .infinity)
+                    Text("Over Limit").frame(maxWidth: .infinity)
                     Text("Headroom").frame(maxWidth: .infinity)
                 }
                 .font(.caption.bold())
@@ -211,32 +219,49 @@ struct PlanProjectionTable: View {
                         Text(proj.plan.monthlyPrice == 0 ? "Free" : "$\(Int(proj.plan.monthlyPrice))")
                             .frame(maxWidth: .infinity)
 
-                        // Avg 5h
-                        Text("\(Int(proj.projectedAvg5h))%")
-                            .foregroundColor(utilizationColor(proj.projectedAvg5h))
-                            .frame(maxWidth: .infinity)
-
-                        // Avg weekly
-                        Text("\(Int(proj.projectedAvgWeekly))%")
-                            .foregroundColor(utilizationColor(proj.projectedAvgWeekly))
-                            .frame(maxWidth: .infinity)
-
-                        // At 5h limit
+                        // Typical 5h (avg peak)
                         Group {
-                            if proj.pctTimeAt5hLimit < 1 {
+                            if proj.total5hCycles == 0 {
                                 Text("\u{2014}").foregroundColor(.secondary)
                             } else {
-                                Text("\(Int(proj.pctTimeAt5hLimit))%").foregroundColor(limitColor(proj.pctTimeAt5hLimit))
+                                Text("\(Int(proj.avgPeak5h))%")
+                                    .foregroundColor(utilizationColor(proj.avgPeak5h))
                             }
                         }
                         .frame(maxWidth: .infinity)
 
-                        // At weekly limit
+                        // Typical weekly (avg peak)
                         Group {
-                            if proj.pctTimeAtWeeklyLimit < 1 {
+                            if proj.totalWeeklyCycles == 0 {
                                 Text("\u{2014}").foregroundColor(.secondary)
                             } else {
-                                Text("\(Int(proj.pctTimeAtWeeklyLimit))%").foregroundColor(limitColor(proj.pctTimeAtWeeklyLimit))
+                                Text("\(Int(proj.avgPeakWeekly))%")
+                                    .foregroundColor(utilizationColor(proj.avgPeakWeekly))
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+
+                        // Peak 5h (worst case)
+                        Group {
+                            if proj.total5hCycles == 0 {
+                                Text("\u{2014}").foregroundColor(.secondary)
+                            } else {
+                                Text("\(Int(proj.maxPeak5h))%")
+                                    .foregroundColor(utilizationColor(proj.maxPeak5h))
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+
+                        // Over limit (combined cycles over / total)
+                        Group {
+                            let totalOver = proj.cyclesOver5h + proj.cyclesOverWeekly
+                            if totalOver == 0 {
+                                Text("\u{2014}").foregroundColor(.secondary)
+                            } else {
+                                let totalCycles = max(proj.total5hCycles + proj.totalWeeklyCycles, 1)
+                                let pctOver = Double(totalOver) / Double(totalCycles) * 100
+                                Text("\(totalOver)/\(totalCycles)")
+                                    .foregroundColor(limitColor(pctOver))
                             }
                         }
                         .frame(maxWidth: .infinity)
@@ -264,8 +289,8 @@ struct PlanProjectionTable: View {
 
     private func utilizationColor(_ pct: Double) -> Color {
         if pct < 50 { return .green }
-        if pct < 75 { return .primary }
-        if pct < 90 { return .orange }
+        if pct < 80 { return .primary }
+        if pct < 95 { return .orange }
         return .red
     }
 
@@ -342,20 +367,18 @@ struct DisclaimerSection: View {
 
             if isExpanded {
                 Text("""
-                Projections are based solely on the usage data Clausage has collected while running. \
-                There may be gaps in the data — for instance, if the app wasn't running or the API was \
-                temporarily unavailable — which can affect accuracy. Additionally, Anthropic may change \
-                plan pricing, usage limits, or introduce new plans at any time, and there can be a delay \
-                before Clausage reflects those changes.
+                Projections analyze your end-of-window usage — how much capacity you actually consume \
+                before each 5-hour and weekly reset. This is measured by detecting window resets and \
+                recording your utilization just before each one. If your laptop was closed during a \
+                reset, the last recorded value is used as an estimate.
 
-                Plan projections estimate what your utilization would look like on each plan by scaling \
-                your current usage relative to each plan's capacity multiplier. This is an approximation \
-                — actual usage patterns may differ when limits change.
+                Plan projections scale these peak values relative to each plan's capacity multiplier. \
+                "Typical" shows your average end-of-window usage, "Peak" shows your worst case, and \
+                "Over Limit" counts how many windows would have exceeded 100% on that plan.
 
-                These projections are meant as a helpful starting point, not a guarantee of the \
-                cheapest or best option. Your actual workflow needs and how you value features like \
-                higher rate limits are factors only you can weigh. We're constantly working to improve \
-                our analysis, but the final decision is always yours.
+                Accuracy improves with more data. Gaps from the app not running or API unavailability \
+                can affect results. Anthropic may change pricing or limits at any time — there can be \
+                a delay before Clausage reflects those changes.
                 """)
                 .font(.caption)
                 .foregroundColor(.secondary)
