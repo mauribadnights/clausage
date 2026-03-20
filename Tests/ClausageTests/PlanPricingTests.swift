@@ -76,11 +76,166 @@ final class PlanPricingTests: XCTestCase {
         XCTAssertEqual(multipliers, multipliers.sorted(), "Usage multipliers should increase with price")
     }
 
+    // MARK: - Peak detection
+
+    func testDetectsResetViaResetsAtTimestamp() {
+        let service = makeService()
+        let now = Date()
+        let context = container.mainContext
+
+        // Snapshot A: 80% usage, resets in 30 min
+        let a = UsageSnapshot(
+            timestamp: now.addingTimeInterval(-3600),
+            fiveHourPercent: 80,
+            weeklyPercent: 60,
+            fiveHourResetsAt: now.addingTimeInterval(-1800),
+            weeklyResetsAt: now.addingTimeInterval(86400)
+        )
+        // Snapshot B: after 5h reset, usage dropped
+        let b = UsageSnapshot(
+            timestamp: now,
+            fiveHourPercent: 10,
+            weeklyPercent: 65,
+            fiveHourResetsAt: now.addingTimeInterval(18000),
+            weeklyResetsAt: now.addingTimeInterval(86400)
+        )
+        context.insert(a)
+        context.insert(b)
+
+        let peaks5h = service.extractWindowPeaks(from: [a, b], window: .fiveHour)
+        let peaksWeekly = service.extractWindowPeaks(from: [a, b], window: .weekly)
+
+        XCTAssertEqual(peaks5h.count, 1, "Should detect one 5h reset")
+        XCTAssertEqual(peaks5h.first, 80, "Peak should be the value before reset")
+        XCTAssertEqual(peaksWeekly.count, 0, "No weekly reset occurred")
+    }
+
+    func testDetectsResetDuringLaptopSleep() {
+        let service = makeService()
+        let now = Date()
+        let context = container.mainContext
+
+        // Snapshot A: 75% weekly, resets in 2 hours — then laptop closed for 8 hours
+        let a = UsageSnapshot(
+            timestamp: now.addingTimeInterval(-28800), // 8h ago
+            fiveHourPercent: 50,
+            weeklyPercent: 75,
+            fiveHourResetsAt: now.addingTimeInterval(-25200), // 7h ago
+            weeklyResetsAt: now.addingTimeInterval(-21600) // 6h ago
+        )
+        // Snapshot B: laptop reopened, both windows have reset
+        let b = UsageSnapshot(
+            timestamp: now,
+            fiveHourPercent: 5,
+            weeklyPercent: 3,
+            fiveHourResetsAt: now.addingTimeInterval(18000),
+            weeklyResetsAt: now.addingTimeInterval(604800)
+        )
+        context.insert(a)
+        context.insert(b)
+
+        let peaks5h = service.extractWindowPeaks(from: [a, b], window: .fiveHour)
+        let peaksWeekly = service.extractWindowPeaks(from: [a, b], window: .weekly)
+
+        XCTAssertEqual(peaks5h.count, 1, "Should detect 5h reset during sleep")
+        XCTAssertEqual(peaks5h.first, 50)
+        XCTAssertEqual(peaksWeekly.count, 1, "Should detect weekly reset during sleep")
+        XCTAssertEqual(peaksWeekly.first, 75)
+    }
+
+    func testFallbackDropDetection() {
+        let service = makeService()
+        let now = Date()
+        let context = container.mainContext
+
+        // Old snapshots without resetsAt data
+        let a = UsageSnapshot(
+            timestamp: now.addingTimeInterval(-600),
+            fiveHourPercent: 70,
+            weeklyPercent: 85
+        )
+        let b = UsageSnapshot(
+            timestamp: now,
+            fiveHourPercent: 5,
+            weeklyPercent: 10
+        )
+        context.insert(a)
+        context.insert(b)
+
+        let peaks5h = service.extractWindowPeaks(from: [a, b], window: .fiveHour)
+        let peaksWeekly = service.extractWindowPeaks(from: [a, b], window: .weekly)
+
+        XCTAssertEqual(peaks5h.count, 1, "Should detect reset via drop fallback")
+        XCTAssertEqual(peaksWeekly.count, 1, "Should detect reset via drop fallback")
+    }
+
+    func testNoFalseResetOnSmallDrop() {
+        let service = makeService()
+        let now = Date()
+        let context = container.mainContext
+
+        // Usage decreases slightly (not a reset)
+        let a = UsageSnapshot(
+            timestamp: now.addingTimeInterval(-300),
+            fiveHourPercent: 50,
+            weeklyPercent: 60
+        )
+        let b = UsageSnapshot(
+            timestamp: now,
+            fiveHourPercent: 48,
+            weeklyPercent: 58
+        )
+        context.insert(a)
+        context.insert(b)
+
+        let peaks5h = service.extractWindowPeaks(from: [a, b], window: .fiveHour)
+        let peaksWeekly = service.extractWindowPeaks(from: [a, b], window: .weekly)
+
+        XCTAssertEqual(peaks5h.count, 0, "Small drop should not trigger reset detection")
+        XCTAssertEqual(peaksWeekly.count, 0)
+    }
+
+    func testMultipleResetsDetected() {
+        let service = makeService()
+        let now = Date()
+        let context = container.mainContext
+
+        // Simulate 3 five-hour windows
+        var snapshots: [UsageSnapshot] = []
+        for cycle in 0..<3 {
+            let baseTime = now.addingTimeInterval(Double(-cycle) * 18000) // 5h apart
+            let resetTime = baseTime.addingTimeInterval(18000) // resets at end
+            let s = UsageSnapshot(
+                timestamp: baseTime,
+                fiveHourPercent: Double(60 + cycle * 10),
+                weeklyPercent: 40,
+                fiveHourResetsAt: resetTime,
+                weeklyResetsAt: now.addingTimeInterval(86400)
+            )
+            context.insert(s)
+            snapshots.append(s)
+        }
+        // Add a final post-reset snapshot
+        let final_ = UsageSnapshot(
+            timestamp: now.addingTimeInterval(300),
+            fiveHourPercent: 5,
+            weeklyPercent: 42
+        )
+        context.insert(final_)
+        snapshots.append(final_)
+
+        // Sort by timestamp
+        snapshots.sort(by: { $0.timestamp < $1.timestamp })
+
+        let peaks5h = service.extractWindowPeaks(from: snapshots, window: .fiveHour)
+        XCTAssertEqual(peaks5h.count, 3, "Should detect 3 five-hour window resets")
+    }
+
     // MARK: - Plan analysis
 
     func testInsufficientDataReturnsEmptyProjections() {
         let service = makeService()
-        let snapshots = makeSnapshots(count: 5, fiveHour: 50, weekly: 50)
+        let snapshots = makeSnapshotsWithResets(windowCount: 1, peakFiveHour: 50, peakWeekly: 50, snapshotsPerWindow: 3)
         let result = service.analyzePlans(snapshots: snapshots, currentPlanId: "pro")
         XCTAssertNotNil(result)
         XCTAssertTrue(result!.projections.isEmpty)
@@ -89,7 +244,7 @@ final class PlanPricingTests: XCTestCase {
 
     func testAnalysisReturnsProjectionPerPlan() {
         let service = makeService()
-        let snapshots = makeSnapshots(count: 20, fiveHour: 50, weekly: 40)
+        let snapshots = makeSnapshotsWithResets(windowCount: 5, peakFiveHour: 50, peakWeekly: 40)
         let result = service.analyzePlans(snapshots: snapshots, currentPlanId: "pro")
         XCTAssertNotNil(result)
         XCTAssertEqual(result!.projections.count, 4, "Should have one projection per plan")
@@ -97,48 +252,49 @@ final class PlanPricingTests: XCTestCase {
 
     func testHigherPlanReducesProjectedUtilization() {
         let service = makeService()
-        let snapshots = makeSnapshots(count: 20, fiveHour: 80, weekly: 60)
+        let snapshots = makeSnapshotsWithResets(windowCount: 5, peakFiveHour: 80, peakWeekly: 60)
         let result = service.analyzePlans(snapshots: snapshots, currentPlanId: "pro")!
 
-        let proProjAvg = result.projections.first(where: { $0.plan.id == "pro" })!.projectedAvg5h
-        let maxProjAvg = result.projections.first(where: { $0.plan.id == "max_5x" })!.projectedAvg5h
+        let proProj = result.projections.first(where: { $0.plan.id == "pro" })!.avgPeak5h
+        let maxProj = result.projections.first(where: { $0.plan.id == "max_5x" })!.avgPeak5h
 
-        XCTAssertGreaterThan(proProjAvg, maxProjAvg, "Higher plan should have lower projected utilization")
+        XCTAssertGreaterThan(proProj, maxProj, "Higher plan should have lower projected utilization")
     }
 
     func testLowerPlanIncreasesProjectedUtilization() {
         let service = makeService()
-        let snapshots = makeSnapshots(count: 20, fiveHour: 50, weekly: 30)
+        let snapshots = makeSnapshotsWithResets(windowCount: 5, peakFiveHour: 50, peakWeekly: 30)
         let result = service.analyzePlans(snapshots: snapshots, currentPlanId: "pro")!
 
-        let proProjAvg = result.projections.first(where: { $0.plan.id == "pro" })!.projectedAvg5h
-        let freeProjAvg = result.projections.first(where: { $0.plan.id == "free" })!.projectedAvg5h
+        let proProj = result.projections.first(where: { $0.plan.id == "pro" })!.avgPeak5h
+        let freeProj = result.projections.first(where: { $0.plan.id == "free" })!.avgPeak5h
 
-        XCTAssertLessThan(proProjAvg, freeProjAvg, "Lower plan should have higher projected utilization")
+        XCTAssertLessThan(proProj, freeProj, "Lower plan should have higher projected utilization")
     }
 
-    func testHeavyUserShowsLimitHits() {
+    func testHeavyUserShowsCyclesOverLimit() {
         let service = makeService()
-        let snapshots = makeSnapshots(count: 20, fiveHour: 97, weekly: 85)
+        // 97% on Pro (5x multiplier), projected to Free (1x): 97 * 5 = 485% — way over
+        let snapshots = makeSnapshotsWithResets(windowCount: 5, peakFiveHour: 97, peakWeekly: 85)
         let result = service.analyzePlans(snapshots: snapshots, currentPlanId: "pro")!
 
-        let proProj = result.projections.first(where: { $0.plan.id == "pro" })!
-        XCTAssertGreaterThan(proProj.pctTimeAt5hLimit, 0, "Heavy user should show time at limit")
+        let freeProj = result.projections.first(where: { $0.plan.id == "free" })!
+        XCTAssertGreaterThan(freeProj.cyclesOver5h, 0, "Heavy user should show cycles over limit on free plan")
     }
 
     func testLightUserHasHeadroom() {
         let service = makeService()
-        let snapshots = makeSnapshots(count: 20, fiveHour: 10, weekly: 8)
+        let snapshots = makeSnapshotsWithResets(windowCount: 5, peakFiveHour: 10, peakWeekly: 8)
         let result = service.analyzePlans(snapshots: snapshots, currentPlanId: "pro")!
 
         let proProj = result.projections.first(where: { $0.plan.id == "pro" })!
         XCTAssertGreaterThan(proProj.headroom, 50, "Light user should have plenty of headroom")
-        XCTAssertEqual(proProj.pctTimeAt5hLimit, 0, "Light user should never hit limit")
+        XCTAssertEqual(proProj.cyclesOver5h, 0, "Light user should never exceed limit")
     }
 
     func testInsightContainsUsageInfo() {
         let service = makeService()
-        let snapshots = makeSnapshots(count: 20, fiveHour: 60, weekly: 40)
+        let snapshots = makeSnapshotsWithResets(windowCount: 5, peakFiveHour: 60, peakWeekly: 40)
         let result = service.analyzePlans(snapshots: snapshots, currentPlanId: "pro")!
         XCTAssertFalse(result.insight.isEmpty)
         XCTAssertTrue(result.insight.contains("Pro"), "Insight should mention current plan")
@@ -146,17 +302,24 @@ final class PlanPricingTests: XCTestCase {
 
     func testUnknownPlanReturnsNil() {
         let service = makeService()
-        let snapshots = makeSnapshots(count: 20, fiveHour: 50, weekly: 50)
+        let snapshots = makeSnapshotsWithResets(windowCount: 5, peakFiveHour: 50, peakWeekly: 50)
         let result = service.analyzePlans(snapshots: snapshots, currentPlanId: "nonexistent")
         XCTAssertNil(result)
     }
 
     func testProjectionsHaveUniqueIds() {
         let service = makeService()
-        let snapshots = makeSnapshots(count: 20, fiveHour: 50, weekly: 50)
+        let snapshots = makeSnapshotsWithResets(windowCount: 5, peakFiveHour: 50, peakWeekly: 50)
         let result = service.analyzePlans(snapshots: snapshots, currentPlanId: "pro")!
         let ids = result.projections.map(\.id)
         XCTAssertEqual(Set(ids).count, ids.count, "Projection IDs should be unique")
+    }
+
+    func testAnalysisReportsCycleCounts() {
+        let service = makeService()
+        let snapshots = makeSnapshotsWithResets(windowCount: 5, peakFiveHour: 60, peakWeekly: 40)
+        let result = service.analyzePlans(snapshots: snapshots, currentPlanId: "pro")!
+        XCTAssertGreaterThan(result.fiveHourCycles, 0, "Should report detected 5h cycles")
     }
 
     // MARK: - Helpers
@@ -191,17 +354,54 @@ final class PlanPricingTests: XCTestCase {
         return try JSONDecoder().decode(PricingData.self, from: data)
     }
 
+    /// Generate snapshots that simulate realistic window cycles with resets.
+    /// Each "window" has a ramp-up phase followed by a reset.
     @MainActor
-    private func makeSnapshots(count: Int, fiveHour: Double, weekly: Double) -> [UsageSnapshot] {
+    private func makeSnapshotsWithResets(
+        windowCount: Int,
+        peakFiveHour: Double,
+        peakWeekly: Double,
+        snapshotsPerWindow: Int = 4
+    ) -> [UsageSnapshot] {
         let context = container.mainContext
-        return (0..<count).map { i in
-            let snapshot = UsageSnapshot(
-                timestamp: Date().addingTimeInterval(Double(-i) * 300),
-                fiveHourPercent: fiveHour + Double.random(in: -3...3),
-                weeklyPercent: weekly + Double.random(in: -3...3)
-            )
-            context.insert(snapshot)
-            return snapshot
+        var snapshots: [UsageSnapshot] = []
+        let now = Date()
+        let windowDuration: TimeInterval = 18000 // 5 hours
+
+        for window in 0..<windowCount {
+            let windowStart = now.addingTimeInterval(Double(-(windowCount - window)) * windowDuration)
+            let resetTime = windowStart.addingTimeInterval(windowDuration)
+
+            for step in 0..<snapshotsPerWindow {
+                let progress = Double(step + 1) / Double(snapshotsPerWindow)
+                let timestamp = windowStart.addingTimeInterval(windowDuration * progress * 0.9) // don't go past reset
+
+                let fiveHour = peakFiveHour * progress + Double.random(in: -2...2)
+                let weekly = peakWeekly * (Double(window) + progress) / Double(windowCount) + Double.random(in: -2...2)
+
+                let snapshot = UsageSnapshot(
+                    timestamp: timestamp,
+                    fiveHourPercent: max(0, fiveHour),
+                    weeklyPercent: max(0, min(100, weekly)),
+                    fiveHourResetsAt: resetTime,
+                    weeklyResetsAt: window == windowCount - 1 ? resetTime : nil
+                )
+                context.insert(snapshot)
+                snapshots.append(snapshot)
+            }
         }
+
+        // Add one post-reset snapshot
+        let postReset = UsageSnapshot(
+            timestamp: now.addingTimeInterval(60),
+            fiveHourPercent: 2,
+            weeklyPercent: 3,
+            fiveHourResetsAt: now.addingTimeInterval(18000),
+            weeklyResetsAt: now.addingTimeInterval(604800)
+        )
+        context.insert(postReset)
+        snapshots.append(postReset)
+
+        return snapshots.sorted(by: { $0.timestamp < $1.timestamp })
     }
 }
