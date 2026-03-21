@@ -113,11 +113,13 @@ final class UsageService {
         }
     }
 
+    @MainActor
     private func persistSnapshot(_ data: UsageData) {
         guard let container = modelContainer,
               let fiveHour = data.fiveHourPercent,
               let weekly = data.weeklyPercent else { return }
 
+        let context = ModelContext(container)
         let snapshot = UsageSnapshot(
             timestamp: Date(),
             fiveHourPercent: fiveHour,
@@ -125,12 +127,8 @@ final class UsageService {
             fiveHourResetsAt: data.fiveHourResetsAt,
             weeklyResetsAt: data.weeklyResetsAt
         )
-
-        Task.detached {
-            let context = ModelContext(container)
-            context.insert(snapshot)
-            try? context.save()
-        }
+        context.insert(snapshot)
+        try? context.save()
     }
 
     // MARK: - API
