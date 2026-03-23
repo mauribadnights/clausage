@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 
 struct MenuBarPopover: View {
     let appState: AppState
@@ -98,6 +99,7 @@ struct MenuBarPopover: View {
 
 struct UsageSection: View {
     let usageService: UsageService
+    @Query(sort: \UsageSnapshot.timestamp, order: .forward) private var snapshots: [UsageSnapshot]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -136,6 +138,14 @@ struct UsageSection: View {
                 Text(error)
                     .font(.system(size: 11))
                     .foregroundColor(.red)
+            }
+
+            // Burn window hint
+            if let weekly = usageService.usage.weeklyPercent,
+               let resetsAt = usageService.usage.weeklyResetsAt,
+               weekly < 99,
+               let burn = UsageService.computeBurnWindow(weeklyPercent: weekly, weeklyResetsAt: resetsAt, snapshots: snapshots) {
+                BurnHintRow(burn: burn)
             }
 
             if let lastUpdated = usageService.usage.lastUpdated {
@@ -247,6 +257,52 @@ struct UsageRow: View {
         if pct < 50 { return .green }
         if pct < 80 { return .orange }
         return .red
+    }
+}
+
+struct BurnHintRow: View {
+    let burn: UsageService.BurnWindow
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 4) {
+                Image(systemName: "flame")
+                    .font(.system(size: 9))
+                    .foregroundColor(burn.shouldStartNow ? .red : .orange)
+                Text(hintText)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(burn.shouldStartNow ? .red : .orange)
+            }
+            if !burn.shouldStartNow {
+                Text(burn.startBurningAt.formatted(date: .abbreviated, time: .shortened))
+                    .font(.system(size: 9))
+                    .foregroundColor(.secondary.opacity(0.7))
+                    .padding(.leading, 13)
+            }
+        }
+        .padding(.top, 2)
+    }
+
+    private var hintText: String {
+        if burn.shouldStartNow {
+            if burn.maxReachablePercent < 99 {
+                return "Burn now! Max reachable: \(Int(burn.maxReachablePercent))%"
+            }
+            return "Burn now to max out before reset!"
+        }
+
+        let interval = burn.startBurningAt.timeIntervalSince(Date())
+        let hours = Int(interval) / 3600
+        let minutes = (Int(interval) % 3600) / 60
+
+        if hours > 24 {
+            let days = hours / 24
+            return "Start burning in \(days)d \(hours % 24)h"
+        } else if hours > 0 {
+            return "Start burning in \(hours)h \(minutes)m"
+        } else {
+            return "Start burning in \(minutes)m"
+        }
     }
 }
 

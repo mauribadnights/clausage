@@ -1,8 +1,10 @@
 import SwiftUI
+import SwiftData
 
 struct DashboardView: View {
     let usageService: UsageService
     let appState: AppState
+    @Query(sort: \UsageSnapshot.timestamp, order: .forward) private var snapshots: [UsageSnapshot]
 
     var body: some View {
         ScrollView {
@@ -28,6 +30,16 @@ struct DashboardView: View {
                         resetsAt: usageService.usage.weeklyResetsAt,
                         icon: "calendar"
                     )
+                }
+
+                // Burn window card
+                if let weekly = usageService.usage.weeklyPercent,
+                   let resetsAt = usageService.usage.weeklyResetsAt {
+                    if let burn = UsageService.computeBurnWindow(weeklyPercent: weekly, weeklyResetsAt: resetsAt, snapshots: snapshots) {
+                        BurnWindowCard(burn: burn, weeklyPercent: weekly)
+                    } else if weekly < 99 {
+                        BurnWindowNoDataCard()
+                    }
                 }
 
                 // Promo status card
@@ -143,6 +155,148 @@ struct UsageCard: View {
         if pct < 50 { return .green }
         if pct < 80 { return .orange }
         return .red
+    }
+}
+
+struct BurnWindowCard: View {
+    let burn: UsageService.BurnWindow
+    let weeklyPercent: Double
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "flame")
+                    .font(.title3)
+                    .foregroundColor(burn.shouldStartNow ? .red : .orange)
+                Text("Burn Window")
+                    .font(.headline)
+                Spacer()
+                if weeklyPercent >= 99 {
+                    Text("Maxed out")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            if weeklyPercent >= 99 {
+                Text("Weekly usage is already at capacity.")
+                    .font(.callout)
+                    .foregroundColor(.secondary)
+            } else if burn.shouldStartNow {
+                // Should be burning right now
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.circle.fill")
+                            .foregroundColor(.red)
+                        Text("Start burning now!")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(.red)
+                    }
+
+                    if burn.maxReachablePercent < 99 {
+                        Text("Not enough time to reach 100%. Max reachable: \(Int(burn.maxReachablePercent))%")
+                            .font(.callout)
+                            .foregroundColor(.orange)
+                    } else {
+                        Text("You have enough time to reach 100% if you start now.")
+                            .font(.callout)
+                            .foregroundColor(.secondary)
+                    }
+
+                    HStack(spacing: 16) {
+                        Label("\(formatHours(burn.hoursUntilReset)) until reset", systemImage: "clock")
+                        Label("\(formatHours(burn.hoursNeeded)) of heavy use needed", systemImage: "bolt.fill")
+                    }
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                }
+            } else {
+                // Future start time
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text("Start burning")
+                            .font(.callout)
+                            .foregroundColor(.secondary)
+                        Text(burnStartString)
+                            .font(.system(size: 20, weight: .bold, design: .rounded))
+                            .foregroundColor(.orange)
+                    }
+
+                    Text(burn.startBurningAt.formatted(date: .abbreviated, time: .shortened))
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    HStack(spacing: 16) {
+                        Label("\(Int(100 - weeklyPercent))% remaining", systemImage: "chart.bar.fill")
+                        Label("\(formatHours(burn.hoursNeeded)) of heavy use", systemImage: "bolt.fill")
+                    }
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                }
+            }
+
+            // Burn rate info
+            Text("Estimated burn rate: \(String(format: "%.1f", burn.burnRatePerHour))%/hr (from your usage history)")
+                .font(.system(size: 10))
+                .foregroundColor(.secondary.opacity(0.7))
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            (burn.shouldStartNow ? Color.red : Color.orange).opacity(0.08)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var burnStartString: String {
+        let interval = burn.startBurningAt.timeIntervalSince(Date())
+        guard interval > 0 else { return "now" }
+
+        let hours = Int(interval) / 3600
+        let minutes = (Int(interval) % 3600) / 60
+
+        if hours > 24 {
+            let days = hours / 24
+            return "in \(days)d \(hours % 24)h"
+        } else if hours > 0 {
+            return "in \(hours)h \(minutes)m"
+        } else {
+            return "in \(minutes)m"
+        }
+    }
+
+    private func formatHours(_ h: Double) -> String {
+        if h >= 24 {
+            let days = Int(h) / 24
+            let hrs = Int(h) % 24
+            return "\(days)d \(hrs)h"
+        } else if h >= 1 {
+            return "\(Int(h))h \(Int(h.truncatingRemainder(dividingBy: 1) * 60))m"
+        } else {
+            return "\(Int(h * 60))m"
+        }
+    }
+}
+
+struct BurnWindowNoDataCard: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: "flame")
+                    .font(.title3)
+                    .foregroundColor(.secondary)
+                Text("Burn Window")
+                    .font(.headline)
+                Spacer()
+            }
+            Text("Not enough usage data yet to estimate your burn rate. Keep using Claude \u{2014} the burn window will appear once enough high-usage periods are recorded.")
+                .font(.callout)
+                .foregroundColor(.secondary)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.3))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 }
 

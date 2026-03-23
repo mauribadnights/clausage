@@ -308,6 +308,100 @@ final class UsageService {
         return data
     }
 
+    // MARK: - Burn window calculation
+
+    struct BurnWindow {
+        /// When to start using Claude at max intensity
+        let startBurningAt: Date
+        /// Hours of heavy usage needed to reach 100% weekly
+        let hoursNeeded: Double
+        /// Hours until weekly reset
+        let hoursUntilReset: Double
+        /// Maximum weekly % reachable if you start burning right now
+        let maxReachablePercent: Double
+        /// Whether you should already be burning (startBurningAt is in the past)
+        let shouldStartNow: Bool
+        /// Estimated max burn rate in weekly %/hour (from empirical data)
+        let burnRatePerHour: Double
+        /// Whether the rate is empirical (true) or we need more data (false = no result)
+        let isEmpirical: Bool
+    }
+
+    /// Estimates the max weekly burn rate from historical snapshots.
+    /// Looks at consecutive snapshot pairs where 5h usage was high (>50%)
+    /// and measures how fast weekly% was climbing.
+    /// Returns the 90th percentile rate in weekly %/hour, or nil if not enough data.
+    static func estimateMaxBurnRate(from snapshots: [UsageSnapshot]) -> Double? {
+        let sorted = snapshots.sorted(by: { $0.timestamp < $1.timestamp })
+        guard sorted.count >= 2 else { return nil }
+
+        var rates: [Double] = []
+
+        for i in 0..<(sorted.count - 1) {
+            let current = sorted[i]
+            let next = sorted[i + 1]
+
+            let timeDeltaHours = next.timestamp.timeIntervalSince(current.timestamp) / 3600.0
+            // Skip gaps > 1 hour (laptop closed, app not running)
+            guard timeDeltaHours > 0 && timeDeltaHours < 1.0 else { continue }
+
+            // Only consider periods where 5h usage was high (actively using Claude)
+            guard current.fiveHourPercent > 50 else { continue }
+
+            let weeklyDelta = next.weeklyPercent - current.weeklyPercent
+            // Skip if weekly% decreased (reset happened) or didn't change
+            guard weeklyDelta > 0 else { continue }
+
+            let rate = weeklyDelta / timeDeltaHours
+            // Sanity check: skip absurd rates (>20%/hr would empty weekly in 5 hours)
+            guard rate < 20 else { continue }
+
+            rates.append(rate)
+        }
+
+        // Need a reasonable sample to estimate
+        guard rates.count >= 3 else { return nil }
+
+        // Use the 90th percentile as the "max sustainable" rate
+        let sorted90 = rates.sorted()
+        let p90Index = Int(Double(sorted90.count - 1) * 0.9)
+        return sorted90[p90Index]
+    }
+
+    /// Computes when to start burning remaining weekly budget at max intensity.
+    /// Uses empirical burn rate estimated from historical snapshots.
+    /// Returns nil if weekly reset is in the past or no data available.
+    static func computeBurnWindow(
+        weeklyPercent: Double,
+        weeklyResetsAt: Date,
+        snapshots: [UsageSnapshot],
+        now: Date = Date()
+    ) -> BurnWindow? {
+        let hoursUntilReset = weeklyResetsAt.timeIntervalSince(now) / 3600.0
+        guard hoursUntilReset > 0 else { return nil }
+
+        guard let burnRate = estimateMaxBurnRate(from: snapshots) else { return nil }
+
+        let remaining = max(100.0 - weeklyPercent, 0)
+        let hoursNeeded = remaining / burnRate
+
+        let startBurningAt = weeklyResetsAt.addingTimeInterval(-hoursNeeded * 3600)
+        let shouldStartNow = startBurningAt.timeIntervalSince(now) <= 0
+
+        let maxBurnable = hoursUntilReset * burnRate
+        let maxReachable = min(weeklyPercent + maxBurnable, 100.0)
+
+        return BurnWindow(
+            startBurningAt: startBurningAt,
+            hoursNeeded: hoursNeeded,
+            hoursUntilReset: hoursUntilReset,
+            maxReachablePercent: maxReachable,
+            shouldStartNow: shouldStartNow,
+            burnRatePerHour: burnRate,
+            isEmpirical: true
+        )
+    }
+
     static func resetTimeString(_ date: Date?) -> String {
         guard let date = date else { return "\u{2014}" }
         let interval = date.timeIntervalSince(Date())
