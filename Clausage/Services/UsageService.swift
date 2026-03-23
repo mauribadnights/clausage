@@ -54,8 +54,8 @@ final class UsageService {
         refreshTimer?.invalidate()
         let interval = AppSettings.shared.refreshInterval
         refreshTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-            let s = self
-            Task { @MainActor in s?.fetch() }
+            guard let self else { return }
+            Task { @MainActor [weak self] in self?.fetch() }
         }
     }
 
