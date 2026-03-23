@@ -106,7 +106,7 @@ final class PlanPricingTests: XCTestCase {
         let peaksWeekly = service.extractWindowPeaks(from: [a, b], window: .weekly)
 
         XCTAssertEqual(peaks5h.count, 1, "Should detect one 5h reset")
-        XCTAssertEqual(peaks5h.first, 80, "Peak should be the value before reset")
+        XCTAssertEqual(peaks5h.first?.value, 80, "Peak should be the value before reset")
         XCTAssertEqual(peaksWeekly.count, 0, "No weekly reset occurred")
     }
 
@@ -138,9 +138,9 @@ final class PlanPricingTests: XCTestCase {
         let peaksWeekly = service.extractWindowPeaks(from: [a, b], window: .weekly)
 
         XCTAssertEqual(peaks5h.count, 1, "Should detect 5h reset during sleep")
-        XCTAssertEqual(peaks5h.first, 50)
+        XCTAssertEqual(peaks5h.first?.value, 50)
         XCTAssertEqual(peaksWeekly.count, 1, "Should detect weekly reset during sleep")
-        XCTAssertEqual(peaksWeekly.first, 75)
+        XCTAssertEqual(peaksWeekly.first?.value, 75)
     }
 
     func testFallbackDropDetection() {
@@ -320,6 +320,81 @@ final class PlanPricingTests: XCTestCase {
         let snapshots = makeSnapshotsWithResets(windowCount: 5, peakFiveHour: 60, peakWeekly: 40)
         let result = service.analyzePlans(snapshots: snapshots, currentPlanId: "pro")!
         XCTAssertGreaterThan(result.fiveHourCycles, 0, "Should report detected 5h cycles")
+    }
+
+    // MARK: - Plan history
+
+    func testPlanHistoryScalesPeaksCorrectly() {
+        let service = makeService()
+        let now = Date()
+        let context = container.mainContext
+
+        // 3 peaks recorded on Pro (before switch), each at 80%
+        // Pro multiplier = 5, Max 20x multiplier = 100
+        // With history:   80 * (5/100) = 4% projected onto Max 20x
+        // Without history: 80 * (100/100) = 80% projected onto Max 20x
+        let switchDate = now.addingTimeInterval(-18000) // switched 5h ago
+
+        let history = [
+            PlanChange(date: .distantPast, planId: "pro"),
+            PlanChange(date: switchDate, planId: "max_20x")
+        ]
+
+        // Build 3 five-hour windows with resets, all BEFORE the switch date
+        var snapshots: [UsageSnapshot] = []
+        for cycle in 0..<3 {
+            let baseTime = now.addingTimeInterval(Double(-(cycle + 2)) * 18000) // well before switchDate
+            let resetTime = baseTime.addingTimeInterval(18000)
+            let peak = UsageSnapshot(
+                timestamp: baseTime,
+                fiveHourPercent: 80,
+                weeklyPercent: 60,
+                fiveHourResetsAt: resetTime,
+                weeklyResetsAt: now.addingTimeInterval(86400)
+            )
+            context.insert(peak)
+            snapshots.append(peak)
+        }
+        // Add enough post-reset snapshots to meet the 10-sample minimum
+        for i in 0..<8 {
+            let s = UsageSnapshot(
+                timestamp: now.addingTimeInterval(Double(-i) * 300),
+                fiveHourPercent: 5,
+                weeklyPercent: 10,
+                fiveHourResetsAt: now.addingTimeInterval(18000),
+                weeklyResetsAt: now.addingTimeInterval(604800)
+            )
+            context.insert(s)
+            snapshots.append(s)
+        }
+        snapshots.sort(by: { $0.timestamp < $1.timestamp })
+
+        let resultWithHistory = service.analyzePlans(snapshots: snapshots, currentPlanId: "max_20x", planHistory: history)!
+        let resultWithoutHistory = service.analyzePlans(snapshots: snapshots, currentPlanId: "max_20x")!
+
+        let max20xWithHistory = resultWithHistory.projections.first(where: { $0.plan.id == "max_20x" })!
+        let max20xWithout = resultWithoutHistory.projections.first(where: { $0.plan.id == "max_20x" })!
+
+        // With history: peaks at 80% on Pro → 80 * (5/100) = 4% on Max 20x
+        // Without history: peaks at 80% assumed Max 20x → 80 * (100/100) = 80%
+        XCTAssertLessThan(max20xWithHistory.avgPeak5h, 10,
+            "Pro peaks projected onto Max 20x should be very low (~4%)")
+        XCTAssertGreaterThan(max20xWithout.avgPeak5h, 70,
+            "Without history, peaks are assumed to be Max 20x usage (~80%)")
+    }
+
+    func testEmptyPlanHistoryMatchesLegacyBehavior() {
+        let service = makeService()
+        let snapshots = makeSnapshotsWithResets(windowCount: 5, peakFiveHour: 60, peakWeekly: 40)
+
+        let withEmpty = service.analyzePlans(snapshots: snapshots, currentPlanId: "pro", planHistory: [])!
+        let withDefault = service.analyzePlans(snapshots: snapshots, currentPlanId: "pro")!
+
+        let proEmpty = withEmpty.projections.first(where: { $0.plan.id == "pro" })!
+        let proDefault = withDefault.projections.first(where: { $0.plan.id == "pro" })!
+
+        XCTAssertEqual(proEmpty.avgPeak5h, proDefault.avgPeak5h, accuracy: 0.01,
+            "Empty plan history should produce same results as no history")
     }
 
     // MARK: - Helpers

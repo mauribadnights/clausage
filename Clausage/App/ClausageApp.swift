@@ -43,7 +43,10 @@ struct ClausageApp: App {
             )
             .modelContainer(modelContainer)
             .onAppear {
-                NSApp.setActivationPolicy(.regular)
+                // Defer to avoid tearing down MenuBarExtra panel mid-gesture
+                DispatchQueue.main.async {
+                    NSApp.setActivationPolicy(.regular)
+                }
             }
             .onDisappear {
                 // Small delay to avoid flicker if reopening immediately

@@ -5,9 +5,15 @@ struct PlanOptimizerView: View {
     let pricingService: PlanPricingService
     @Query(sort: \UsageSnapshot.timestamp, order: .forward) private var snapshots: [UsageSnapshot]
     @State private var selectedPlanId: String = AppSettings.shared.currentPlanId
+    @State private var pendingPlanChange: PlanTier?
+    @State private var planChangeDate: Date = Date()
 
     private var analysis: PlanAnalysis? {
-        pricingService.analyzePlans(snapshots: snapshots, currentPlanId: selectedPlanId)
+        pricingService.analyzePlans(
+            snapshots: snapshots,
+            currentPlanId: selectedPlanId,
+            planHistory: AppSettings.shared.planHistory
+        )
     }
 
     var body: some View {
@@ -17,11 +23,18 @@ struct PlanOptimizerView: View {
                 if let pricing = pricingService.pricing {
                     CurrentPlanSelector(
                         plans: pricing.plans,
-                        selectedPlanId: $selectedPlanId
+                        selectedPlanId: selectedPlanId,
+                        planHistory: AppSettings.shared.planHistory,
+                        onPlanTapped: { plan in
+                            if plan.id != selectedPlanId {
+                                pendingPlanChange = plan
+                                planChangeDate = Date()
+                            }
+                        },
+                        onResetHistory: {
+                            AppSettings.shared.planHistory = []
+                        }
                     )
-                    .onChange(of: selectedPlanId) { _, newValue in
-                        AppSettings.shared.currentPlanId = newValue
-                    }
                 }
 
                 if let analysis = analysis {
@@ -77,6 +90,27 @@ struct PlanOptimizerView: View {
             .padding(24)
         }
         .navigationTitle("Plan Optimizer")
+        .sheet(item: $pendingPlanChange) { plan in
+            PlanChangeSheet(
+                oldPlanName: pricingService.pricing?.plans.first(where: { $0.id == selectedPlanId })?.name ?? selectedPlanId,
+                newPlan: plan,
+                date: $planChangeDate,
+                onConfirm: { confirmPlanChange(to: plan) }
+            )
+        }
+    }
+
+    private func confirmPlanChange(to plan: PlanTier) {
+        let settings = AppSettings.shared
+        // Seed history with old plan if empty — ensures pre-switch data is attributed correctly
+        if settings.planHistory.isEmpty {
+            settings.planHistory = [PlanChange(date: .distantPast, planId: selectedPlanId)]
+        }
+        settings.planHistory.append(PlanChange(date: planChangeDate, planId: plan.id))
+        settings.planHistory.sort(by: { $0.date < $1.date })
+        selectedPlanId = plan.id
+        settings.currentPlanId = plan.id
+        pendingPlanChange = nil
     }
 }
 
@@ -84,7 +118,10 @@ struct PlanOptimizerView: View {
 
 struct CurrentPlanSelector: View {
     let plans: [PlanTier]
-    @Binding var selectedPlanId: String
+    let selectedPlanId: String
+    let planHistory: [PlanChange]
+    let onPlanTapped: (PlanTier) -> Void
+    let onResetHistory: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -94,9 +131,30 @@ struct CurrentPlanSelector: View {
             HStack(spacing: 8) {
                 ForEach(plans) { plan in
                     PlanButton(plan: plan, isSelected: selectedPlanId == plan.id) {
-                        selectedPlanId = plan.id
+                        onPlanTapped(plan)
                     }
                 }
+            }
+
+            if planHistory.count > 1 {
+                HStack(spacing: 4) {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.caption2)
+                    let entries = planHistory.filter { $0.date != .distantPast }
+                    if let lastSwitch = entries.last,
+                       let planName = plans.first(where: { $0.id == lastSwitch.planId })?.name {
+                        Text("\(planName) since \(lastSwitch.date, style: .date)")
+                    }
+                    Spacer()
+                    Button("Reset history") {
+                        onResetHistory()
+                    }
+                    .font(.caption2)
+                    .buttonStyle(.plain)
+                    .foregroundColor(.secondary)
+                }
+                .font(.caption)
+                .foregroundColor(.secondary)
             }
         }
     }
@@ -176,7 +234,7 @@ struct PlanProjectionTable: View {
             Text("Plan Comparison")
                 .font(.headline)
 
-            Text("Based on your actual end-of-window usage — how much capacity you consume before each reset.")
+            Text("Based on your end-of-window usage, weighted toward recent days.")
                 .font(.caption)
                 .foregroundColor(.secondary)
 
@@ -341,6 +399,66 @@ struct TokenPricingTable: View {
     }
 }
 
+// MARK: - Plan Change Sheet
+
+struct PlanChangeSheet: View {
+    let oldPlanName: String
+    let newPlan: PlanTier
+    @Binding var date: Date
+    let onConfirm: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 20) {
+            Text("Switching Plans")
+                .font(.headline)
+
+            VStack(spacing: 6) {
+                HStack {
+                    Text("From:")
+                        .foregroundColor(.secondary)
+                    Text(oldPlanName)
+                        .fontWeight(.medium)
+                    Spacer()
+                }
+                HStack {
+                    Text("To:")
+                        .foregroundColor(.secondary)
+                    Text("\(newPlan.name) ($\(Int(newPlan.monthlyPrice))/mo)")
+                        .fontWeight(.medium)
+                    Spacer()
+                }
+            }
+            .font(.callout)
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("When did you switch?")
+                    .font(.callout)
+                DatePicker("Switch date", selection: $date, in: ...Date(), displayedComponents: .date)
+                    .labelsHidden()
+            }
+
+            Text("Usage data before this date will be analyzed as \(oldPlanName) usage for accurate projections.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            HStack {
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Confirm") { onConfirm() }
+                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(24)
+        .frame(width: 340)
+    }
+}
+
 // MARK: - Disclaimer
 
 struct DisclaimerSection: View {
@@ -373,8 +491,9 @@ struct DisclaimerSection: View {
                 reset, the last recorded value is used as an estimate.
 
                 Plan projections scale these peak values relative to each plan's capacity multiplier. \
-                "Typical" shows your average end-of-window usage, "Peak" shows your worst case, and \
-                "Over Limit" counts how many windows would have exceeded 100% on that plan.
+                "Typical" shows your recency-weighted average (recent days count more, with a \
+                3-day half-life), "Peak" shows your worst case, and "Over Limit" counts how many \
+                windows would have exceeded 100% on that plan.
 
                 Accuracy improves with more data. Gaps from the app not running or API unavailability \
                 can affect results. Anthropic may change pricing or limits at any time — there can be \

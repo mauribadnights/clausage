@@ -16,24 +16,33 @@ final class AppState {
     var usageWeekly: Double?
 
     private var timer: Timer?
+    private weak var usageServiceRef: UsageService?
+
+    // Cache last menu bar image inputs to avoid unnecessary re-renders
+    @ObservationIgnored private var lastImageText: String?
+    @ObservationIgnored private var lastImageFiveHour: Double?
+    @ObservationIgnored private var lastImageWeekly: Double?
+    @ObservationIgnored private var lastImageShowBars: Bool = false
 
     init() {
         update()
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            let s = self
-            Task { @MainActor in s?.update() }
+            guard let self else { return }
+            Task { @MainActor [weak self] in self?.update() }
         }
     }
 
     func bindUsage(_ service: UsageService) {
-        Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self, weak service] _ in
-            let s = self
-            let svc = service
-            Task { @MainActor in
-                guard let s, let svc else { return }
-                s.usageFiveHour = svc.usage.fiveHourPercent
-                s.usageWeekly = svc.usage.weeklyPercent
-            }
+        usageServiceRef = service
+    }
+
+    /// Set a property only when the value actually changes.
+    /// @Observable triggers observation on every set — even same-value — which
+    /// causes SwiftUI to tear down and recreate the MenuBarExtra popover,
+    /// invalidating gesture recognizers mid-click.
+    private func setIfChanged<T: Equatable>(_ keyPath: ReferenceWritableKeyPath<AppState, T>, _ value: T) {
+        if self[keyPath: keyPath] != value {
+            self[keyPath: keyPath] = value
         }
     }
 
@@ -41,7 +50,13 @@ final class AppState {
         let now = Date()
         let settings = AppSettings.shared
         let fmt = settings.timerFormat
-        status = PromoSchedule.shared.currentStatus(at: now)
+        setIfChanged(\.status, PromoSchedule.shared.currentStatus(at: now))
+
+        // Sync usage from service
+        if let svc = usageServiceRef {
+            setIfChanged(\.usageFiveHour, svc.usage.fiveHourPercent)
+            setIfChanged(\.usageWeekly, svc.usage.weeklyPercent)
+        }
 
         let showTimer = settings.showPromoTimer && status != .ended && status != .disabled
         if showTimer {
@@ -49,83 +64,95 @@ final class AppState {
         } else {
             let percentValue: Double? = settings.menuBarPercentSource == "weekly" ? usageWeekly : usageFiveHour
             if settings.showMenuBarPercent, let pct = percentValue {
-                menuBarText = "\(Int(pct))%"
+                setIfChanged(\.menuBarText, "\(Int(pct))%")
             } else if !settings.showUsageBars {
-                // No bars and no percent — show something
                 if let pct = percentValue ?? usageFiveHour {
-                    menuBarText = "\(Int(pct))%"
+                    setIfChanged(\.menuBarText, "\(Int(pct))%")
                 } else {
-                    menuBarText = "..."
+                    setIfChanged(\.menuBarText, "...")
                 }
             } else {
-                menuBarText = "" // Bars-only mode
+                setIfChanged(\.menuBarText, "")
             }
-            statusDescription = "Claude Usage"
-            countdownText = ""
-            nextTransitionDescription = ""
+            setIfChanged(\.statusDescription, "Claude Usage")
+            setIfChanged(\.countdownText, "")
+            setIfChanged(\.nextTransitionDescription, "")
         }
 
         let showBars = settings.showUsageBars
         let showText = !menuBarText.isEmpty
-        menuBarImage = AppState.makeMenuBarImage(
-            text: showText ? menuBarText : nil,
-            color: menuBarColor,
-            fiveHourPct: showBars ? usageFiveHour : nil,
-            weeklyPct: showBars ? usageWeekly : nil
-        )
+        let imageText = showText ? menuBarText : nil
+        let imageFiveHour = showBars ? usageFiveHour : nil
+        let imageWeekly = showBars ? usageWeekly : nil
+
+        if imageText != lastImageText
+            || imageFiveHour != lastImageFiveHour
+            || imageWeekly != lastImageWeekly
+            || showBars != lastImageShowBars {
+            lastImageText = imageText
+            lastImageFiveHour = imageFiveHour
+            lastImageWeekly = imageWeekly
+            lastImageShowBars = showBars
+            menuBarImage = AppState.makeMenuBarImage(
+                text: imageText,
+                color: menuBarColor,
+                fiveHourPct: imageFiveHour,
+                weeklyPct: imageWeekly
+            )
+        }
     }
 
     private func updatePromoState(now: Date, fmt: TimerFormat) {
         switch status {
         case .disabled:
-            return // Should not be called when disabled
+            return
         case .notStarted:
             let interval = PromoSchedule.shared.promoStart.timeIntervalSince(now)
             let formatted = fmt.format(interval)
-            menuBarText = formatted
-            statusDescription = "Promo hasn't started yet"
-            countdownText = "Starts in \(formatted)"
-            nextTransitionDescription = "2x usage begins when promo starts"
+            setIfChanged(\.menuBarText, formatted)
+            setIfChanged(\.statusDescription, "Promo hasn't started yet")
+            setIfChanged(\.countdownText, "Starts in \(formatted)")
+            setIfChanged(\.nextTransitionDescription, "2x usage begins when promo starts")
 
         case .active2x:
             if let transition = PromoSchedule.shared.nextTransition(from: now) {
                 let interval = transition.date.timeIntervalSince(now)
                 let formatted = fmt.format(interval)
-                menuBarText = formatted
-                countdownText = formatted
+                setIfChanged(\.menuBarText, formatted)
+                setIfChanged(\.countdownText, formatted)
                 if transition.nextStatus == .peak1x {
-                    nextTransitionDescription = "Peak hours (1x) in \(formatted)"
+                    setIfChanged(\.nextTransitionDescription, "Peak hours (1x) in \(formatted)")
                 } else if transition.nextStatus == .ended {
-                    nextTransitionDescription = "Promo ends in \(formatted)"
+                    setIfChanged(\.nextTransitionDescription, "Promo ends in \(formatted)")
                 }
             } else {
-                menuBarText = "2x"
-                countdownText = ""
+                setIfChanged(\.menuBarText, "2x")
+                setIfChanged(\.countdownText, "")
             }
-            statusDescription = "2x Usage Active"
+            setIfChanged(\.statusDescription, "2x Usage Active")
 
         case .peak1x:
             if let transition = PromoSchedule.shared.nextTransition(from: now) {
                 let interval = transition.date.timeIntervalSince(now)
                 let formatted = fmt.format(interval)
-                menuBarText = formatted
-                countdownText = formatted
-                nextTransitionDescription = "2x returns in \(formatted)"
+                setIfChanged(\.menuBarText, formatted)
+                setIfChanged(\.countdownText, formatted)
+                setIfChanged(\.nextTransitionDescription, "2x returns in \(formatted)")
             } else {
-                menuBarText = "1x"
-                countdownText = ""
+                setIfChanged(\.menuBarText, "1x")
+                setIfChanged(\.countdownText, "")
             }
-            statusDescription = "Peak Hours (1x)"
+            setIfChanged(\.statusDescription, "Peak Hours (1x)")
 
         case .ended:
             if let fiveHour = usageFiveHour {
-                menuBarText = "\(Int(fiveHour))%"
+                setIfChanged(\.menuBarText, "\(Int(fiveHour))%")
             } else {
-                menuBarText = "Done"
+                setIfChanged(\.menuBarText, "Done")
             }
-            statusDescription = "Promo has ended"
-            countdownText = ""
-            nextTransitionDescription = ""
+            setIfChanged(\.statusDescription, "Promo has ended")
+            setIfChanged(\.countdownText, "")
+            setIfChanged(\.nextTransitionDescription, "")
         }
     }
 
@@ -177,19 +204,17 @@ final class AppState {
             let imageWidth = ceil(textSize.width) + padding * 2
             let imageHeight = ceil(textSize.height) + padding + barsArea
 
-            let image = NSImage(size: NSSize(width: imageWidth, height: imageHeight))
-            image.lockFocus()
+            let image = NSImage(size: NSSize(width: imageWidth, height: imageHeight), flipped: false) { _ in
+                attributedString.draw(at: NSPoint(x: padding, y: barsArea))
 
-            attributedString.draw(at: NSPoint(x: padding, y: barsArea))
-
-            if hasBars {
-                let barWidth = imageWidth - padding * 2
-                let barX = padding
-                drawUsageBar(x: barX, y: bottomMargin + barHeight + barSpacing, width: barWidth, height: barHeight, pct: fiveHourPct)
-                drawUsageBar(x: barX, y: bottomMargin, width: barWidth, height: barHeight, pct: weeklyPct)
+                if hasBars {
+                    let barWidth = imageWidth - padding * 2
+                    let barX = padding
+                    drawUsageBar(x: barX, y: bottomMargin + barHeight + barSpacing, width: barWidth, height: barHeight, pct: fiveHourPct)
+                    drawUsageBar(x: barX, y: bottomMargin, width: barWidth, height: barHeight, pct: weeklyPct)
+                }
+                return true
             }
-
-            image.unlockFocus()
             image.isTemplate = false
             return image
         } else {
@@ -199,14 +224,12 @@ final class AppState {
             let imageWidth = barWidth + padding * 2
             let imageHeight = totalHeight + padding * 2
 
-            let image = NSImage(size: NSSize(width: imageWidth, height: imageHeight))
-            image.lockFocus()
-
-            let barX = padding
-            drawUsageBar(x: barX, y: padding + barHeight + barSpacing, width: barWidth, height: barHeight, pct: fiveHourPct)
-            drawUsageBar(x: barX, y: padding, width: barWidth, height: barHeight, pct: weeklyPct)
-
-            image.unlockFocus()
+            let image = NSImage(size: NSSize(width: imageWidth, height: imageHeight), flipped: false) { _ in
+                let barX = padding
+                drawUsageBar(x: barX, y: padding + barHeight + barSpacing, width: barWidth, height: barHeight, pct: fiveHourPct)
+                drawUsageBar(x: barX, y: padding, width: barWidth, height: barHeight, pct: weeklyPct)
+                return true
+            }
             image.isTemplate = false
             return image
         }
