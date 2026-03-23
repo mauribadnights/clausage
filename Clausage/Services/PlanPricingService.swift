@@ -66,7 +66,8 @@ final class PlanPricingService {
     /// Analyze usage and produce per-plan projections using peak-at-reset detection
     func analyzePlans(
         snapshots: [UsageSnapshot],
-        currentPlanId: String
+        currentPlanId: String,
+        planHistory: [PlanChange] = []
     ) -> PlanAnalysis? {
         guard let pricing = pricing else { return nil }
         guard let currentPlan = pricing.plans.first(where: { $0.id == currentPlanId }) else { return nil }
@@ -96,13 +97,23 @@ final class PlanPricingService {
         let peaks5h = extractWindowPeaks(from: sorted, window: .fiveHour)
         let peaksWeekly = extractWindowPeaks(from: sorted, window: .weekly)
 
+        // Resolve per-peak plan multiplier using plan history
+        let resolveMultiplier: (Date) -> Double = { timestamp in
+            let planId = planHistory
+                .filter { $0.date <= timestamp }
+                .max(by: { $0.date < $1.date })?
+                .planId ?? currentPlanId
+            return pricing.plans.first(where: { $0.id == planId })?.usageMultiplier
+                ?? currentPlan.usageMultiplier
+        }
+
         // Compute projections for each plan
         let projections: [PlanProjection] = pricing.plans.map { plan in
             projectPlan(
                 plan,
                 peaks5h: peaks5h,
                 peaksWeekly: peaksWeekly,
-                currentMultiplier: currentPlan.usageMultiplier
+                resolveMultiplier: resolveMultiplier
             )
         }
 
@@ -127,6 +138,11 @@ final class PlanPricingService {
 
     // MARK: - Peak Detection
 
+    struct WindowPeak {
+        let value: Double
+        let timestamp: Date
+    }
+
     enum WindowType {
         case fiveHour, weekly
     }
@@ -135,10 +151,10 @@ final class PlanPricingService {
     /// Uses the stored `resetsAt` timestamp to determine if a reset occurred between
     /// consecutive snapshots. When the laptop is closed during a reset, the last
     /// snapshot before the gap is used as the end-of-window value.
-    func extractWindowPeaks(from snapshots: [UsageSnapshot], window: WindowType) -> [Double] {
+    func extractWindowPeaks(from snapshots: [UsageSnapshot], window: WindowType) -> [WindowPeak] {
         guard snapshots.count >= 2 else { return [] }
 
-        var peaks: [Double] = []
+        var peaks: [WindowPeak] = []
 
         for i in 0..<(snapshots.count - 1) {
             let current = snapshots[i]
@@ -163,14 +179,14 @@ final class PlanPricingService {
             if let resetTime = currentResetsAt,
                resetTime > current.timestamp,
                resetTime <= next.timestamp {
-                peaks.append(currentPercent)
+                peaks.append(WindowPeak(value: currentPercent, timestamp: current.timestamp))
                 continue
             }
 
             // Method 2: Fallback — detect reset by significant usage drop without a known reset time
             // This handles cases where resetsAt wasn't available in older snapshots
             if currentPercent > 10 && nextPercent < currentPercent * 0.4 {
-                peaks.append(currentPercent)
+                peaks.append(WindowPeak(value: currentPercent, timestamp: current.timestamp))
             }
         }
 
@@ -179,26 +195,46 @@ final class PlanPricingService {
 
     // MARK: - Projection
 
+    /// Half-life for recency weighting (days). Data this many days old has half the weight of today's.
+    static let recencyHalfLifeDays: Double = 3.0
+
+    private func weightedAverage(_ items: [(value: Double, timestamp: Date)]) -> Double {
+        guard !items.isEmpty else { return 0 }
+        let now = Date()
+        var weightedSum = 0.0
+        var totalWeight = 0.0
+        for item in items {
+            let ageDays = max(0, now.timeIntervalSince(item.timestamp)) / 86400
+            let weight = pow(2.0, -ageDays / Self.recencyHalfLifeDays)
+            weightedSum += item.value * weight
+            totalWeight += weight
+        }
+        return totalWeight > 0 ? weightedSum / totalWeight : 0
+    }
+
     private func projectPlan(
         _ plan: PlanTier,
-        peaks5h: [Double],
-        peaksWeekly: [Double],
-        currentMultiplier: Double
+        peaks5h: [WindowPeak],
+        peaksWeekly: [WindowPeak],
+        resolveMultiplier: (Date) -> Double
     ) -> PlanProjection {
-        let scale = currentMultiplier / plan.usageMultiplier
+        // Project each peak using its own plan's multiplier (handles plan switches mid-history)
+        let projected5h: [(value: Double, timestamp: Date)] = peaks5h.map { peak in
+            (peak.value * (resolveMultiplier(peak.timestamp) / plan.usageMultiplier), peak.timestamp)
+        }
+        let projectedWeekly: [(value: Double, timestamp: Date)] = peaksWeekly.map { peak in
+            (peak.value * (resolveMultiplier(peak.timestamp) / plan.usageMultiplier), peak.timestamp)
+        }
 
-        // Project peaks onto this plan's capacity
-        let projected5h = peaks5h.map { $0 * scale }
-        let projectedWeekly = peaksWeekly.map { $0 * scale }
+        // Recency-weighted averages: recent data matters more (3-day half-life)
+        let avgPeak5h = weightedAverage(projected5h)
+        let avgPeakWeekly = weightedAverage(projectedWeekly)
 
-        let avgPeak5h = projected5h.isEmpty ? 0 : projected5h.reduce(0, +) / Double(projected5h.count)
-        let avgPeakWeekly = projectedWeekly.isEmpty ? 0 : projectedWeekly.reduce(0, +) / Double(projectedWeekly.count)
+        let maxPeak5h = projected5h.map(\.value).max() ?? 0
+        let maxPeakWeekly = projectedWeekly.map(\.value).max() ?? 0
 
-        let maxPeak5h = projected5h.max() ?? 0
-        let maxPeakWeekly = projectedWeekly.max() ?? 0
-
-        let cyclesOver5h = projected5h.filter { $0 > 100 }.count
-        let cyclesOverWeekly = projectedWeekly.filter { $0 > 100 }.count
+        let cyclesOver5h = projected5h.filter { $0.value > 100 }.count
+        let cyclesOverWeekly = projectedWeekly.filter { $0.value > 100 }.count
 
         // Headroom based on average peaks (negative = over capacity)
         let headroom5h = 100 - avgPeak5h
@@ -238,7 +274,7 @@ final class PlanPricingService {
 
         // Current usage summary based on peaks
         if current.total5hCycles > 0 {
-            let peakStr = "By end of each 5-hour window, you typically use \(Int(current.avgPeak5h))% of your \(currentPlan.name) plan's capacity"
+            let peakStr = "Based on recent usage trends, you typically reach \(Int(current.avgPeak5h))% of your \(currentPlan.name) plan's capacity by end of each 5-hour window"
             if current.cyclesOver5h > 0 {
                 let pctOver = Double(current.cyclesOver5h) / Double(current.total5hCycles) * 100
                 parts.append("\(peakStr), exceeding the limit in \(formatPct(pctOver)) of windows.")

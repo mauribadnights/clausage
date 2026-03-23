@@ -80,6 +80,11 @@ struct TimerColor: Equatable {
     static let defaultRed = TimerColor(red: 0.85, green: 0.15, blue: 0.10)
 }
 
+struct PlanChange: Codable, Equatable {
+    let date: Date
+    let planId: String
+}
+
 @Observable
 final class AppSettings {
     static let shared = AppSettings()
@@ -113,6 +118,31 @@ final class AppSettings {
 
     var currentPlanId: String {
         didSet { UserDefaults.standard.set(currentPlanId, forKey: "currentPlanId") }
+    }
+
+    var planHistory: [PlanChange] {
+        didSet { savePlanHistory() }
+    }
+
+    func activePlanId(at date: Date) -> String {
+        return planHistory
+            .filter { $0.date <= date }
+            .max(by: { $0.date < $1.date })?
+            .planId ?? currentPlanId
+    }
+
+    private func savePlanHistory() {
+        if let data = try? JSONEncoder().encode(planHistory) {
+            UserDefaults.standard.set(data, forKey: "planHistory")
+        }
+    }
+
+    private static func loadPlanHistory() -> [PlanChange] {
+        guard let data = UserDefaults.standard.data(forKey: "planHistory"),
+              let history = try? JSONDecoder().decode([PlanChange].self, from: data) else {
+            return []
+        }
+        return history.sorted(by: { $0.date < $1.date })
     }
 
     var showMenuBarPercent: Bool {
@@ -172,6 +202,7 @@ final class AppSettings {
         }
 
         self.currentPlanId = UserDefaults.standard.string(forKey: "currentPlanId") ?? "pro"
+        self.planHistory = Self.loadPlanHistory()
 
         if UserDefaults.standard.object(forKey: "showMenuBarPercent") == nil {
             self.showMenuBarPercent = false
