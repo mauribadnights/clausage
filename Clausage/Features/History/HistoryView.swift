@@ -23,11 +23,25 @@ enum HistoryRange: String, CaseIterable {
         case .day:
             return .dateTime.hour(.defaultDigits(amPM: .abbreviated))
         case .week:
-            return .dateTime.weekday(.abbreviated).hour(.defaultDigits(amPM: .abbreviated))
+            return .dateTime.weekday(.abbreviated).day()
         case .month:
             return .dateTime.month(.abbreviated).day()
         case .all:
             return .dateTime.month(.abbreviated).day()
+        }
+    }
+
+    /// Format for the hover tooltip — includes more detail than axis labels
+    var tooltipFormat: Date.FormatStyle {
+        switch self {
+        case .day:
+            return .dateTime.hour(.defaultDigits(amPM: .abbreviated)).minute()
+        case .week:
+            return .dateTime.weekday(.wide).hour(.defaultDigits(amPM: .abbreviated)).minute()
+        case .month:
+            return .dateTime.month(.abbreviated).day().hour(.defaultDigits(amPM: .abbreviated))
+        case .all:
+            return .dateTime.year().month(.abbreviated).day()
         }
     }
 
@@ -138,6 +152,8 @@ struct ChartCard: View {
     let range: HistoryRange
     let interpolateGaps: Bool
 
+    @State private var hoveredSnapshot: UsageSnapshot?
+
     private var points: [SegmentedPoint] {
         segmentSnapshots(snapshots, keyPath: keyPath)
     }
@@ -148,6 +164,31 @@ struct ChartCard: View {
                 .font(.headline)
 
             usageChart
+                .chartOverlay { proxy in
+                    GeometryReader { geometry in
+                        Rectangle()
+                            .fill(.clear)
+                            .contentShape(Rectangle())
+                            .onContinuousHover { phase in
+                                switch phase {
+                                case .active(let location):
+                                    let plotFrame = geometry[proxy.plotFrame!]
+                                    let x = location.x - plotFrame.origin.x
+                                    guard x >= 0, x <= plotFrame.width,
+                                          let date: Date = proxy.value(atX: x) else {
+                                        hoveredSnapshot = nil
+                                        return
+                                    }
+                                    // Find nearest snapshot by timestamp
+                                    hoveredSnapshot = snapshots.min(by: {
+                                        abs($0.timestamp.timeIntervalSince(date)) < abs($1.timestamp.timeIntervalSince(date))
+                                    })
+                                case .ended:
+                                    hoveredSnapshot = nil
+                                }
+                            }
+                    }
+                }
                 .frame(height: 200)
 
             HStack(spacing: 16) {
@@ -171,42 +212,81 @@ struct ChartCard: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
+    @ChartContentBuilder
+    private func hoverMarks(for snapshot: UsageSnapshot) -> some ChartContent {
+        let value = Int(snapshot[keyPath: keyPath])
+        RuleMark(x: .value("Time", snapshot.timestamp))
+            .foregroundStyle(.secondary.opacity(0.3))
+            .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+            .annotation(position: .top, spacing: 4) {
+                VStack(spacing: 2) {
+                    Text("\(value)%")
+                        .font(.caption.bold())
+                        .foregroundStyle(color)
+                    Text(snapshot.timestamp, format: range.tooltipFormat)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
+            }
+        PointMark(
+            x: .value("Time", snapshot.timestamp),
+            y: .value("Usage %", snapshot[keyPath: keyPath])
+        )
+        .foregroundStyle(color)
+        .symbolSize(40)
+    }
+
     @ViewBuilder
     private var usageChart: some View {
         if interpolateGaps {
-            Chart(snapshots, id: \.timestamp) { snapshot in
-                LineMark(
-                    x: .value("Time", snapshot.timestamp),
-                    y: .value("Usage %", snapshot[keyPath: keyPath])
-                )
-                .foregroundStyle(color.gradient)
-                .interpolationMethod(.monotone)
+            Chart {
+                ForEach(snapshots, id: \.timestamp) { snapshot in
+                    LineMark(
+                        x: .value("Time", snapshot.timestamp),
+                        y: .value("Usage %", snapshot[keyPath: keyPath])
+                    )
+                    .foregroundStyle(color.gradient)
+                    .interpolationMethod(.monotone)
 
-                AreaMark(
-                    x: .value("Time", snapshot.timestamp),
-                    y: .value("Usage %", snapshot[keyPath: keyPath])
-                )
-                .foregroundStyle(color.opacity(0.1).gradient)
-                .interpolationMethod(.monotone)
+                    AreaMark(
+                        x: .value("Time", snapshot.timestamp),
+                        y: .value("Usage %", snapshot[keyPath: keyPath])
+                    )
+                    .foregroundStyle(color.opacity(0.1).gradient)
+                    .interpolationMethod(.monotone)
+                }
+
+                if let hovered = hoveredSnapshot {
+                    hoverMarks(for: hovered)
+                }
             }
             .chartAxes(range: range)
         } else {
-            Chart(points) { point in
-                LineMark(
-                    x: .value("Time", point.timestamp),
-                    y: .value("Usage %", point.value),
-                    series: .value("Segment", point.segment)
-                )
-                .foregroundStyle(color.gradient)
-                .interpolationMethod(.monotone)
+            Chart {
+                ForEach(points) { point in
+                    LineMark(
+                        x: .value("Time", point.timestamp),
+                        y: .value("Usage %", point.value),
+                        series: .value("Segment", point.segment)
+                    )
+                    .foregroundStyle(color.gradient)
+                    .interpolationMethod(.monotone)
 
-                AreaMark(
-                    x: .value("Time", point.timestamp),
-                    y: .value("Usage %", point.value),
-                    series: .value("Segment", point.segment)
-                )
-                .foregroundStyle(color.opacity(0.1).gradient)
-                .interpolationMethod(.monotone)
+                    AreaMark(
+                        x: .value("Time", point.timestamp),
+                        y: .value("Usage %", point.value),
+                        series: .value("Segment", point.segment)
+                    )
+                    .foregroundStyle(color.opacity(0.1).gradient)
+                    .interpolationMethod(.monotone)
+                }
+
+                if let hovered = hoveredSnapshot {
+                    hoverMarks(for: hovered)
+                }
             }
             .chartAxes(range: range)
         }
