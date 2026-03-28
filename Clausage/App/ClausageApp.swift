@@ -25,6 +25,7 @@ struct ClausageApp: App {
                 usageService: usageService,
                 updateService: updateService
             )
+            .modelContainer(modelContainer)
             .task {
                 usageService.setModelContainer(modelContainer)
                 appState.bindUsage(usageService)
