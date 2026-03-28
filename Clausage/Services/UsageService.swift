@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import AppKit
 
 struct UsageData: Equatable {
     var fiveHourPercent: Double?
@@ -24,11 +25,15 @@ final class UsageService {
     var usage = UsageData()
     var isLoading = false
 
+    var isSyncingRemoteHistory = false
+    var remoteHistorySyncStatus: String? = nil
+
     private var refreshTimer: Timer?
     private var consecutiveFailures = 0
     private var lastSuccessfulUsage: UsageData?
     private var modelContainer: ModelContainer?
     private var retryTask: Task<Void, Never>?
+    @ObservationIgnored private var wakeObserver: Any?
 
     private static let cachedUsageKey = "lastSuccessfulUsage"
 
@@ -48,6 +53,18 @@ final class UsageService {
 
     func setModelContainer(_ container: ModelContainer) {
         self.modelContainer = container
+
+        // Register for wake-from-sleep to auto-fill gaps
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.syncRemoteHistory() }
+        }
+
+        // Sync on launch too
+        Task { @MainActor [weak self] in self?.syncRemoteHistory() }
     }
 
     private func startRefreshTimer() {
@@ -129,6 +146,131 @@ final class UsageService {
         )
         context.insert(snapshot)
         try? context.save()
+    }
+
+    // MARK: - Remote history sync
+
+    /// Fetches snapshots from the ThinkPad history API and inserts any that are
+    /// missing from the local SwiftData store. Safe to call any time — it's a no-op
+    /// when disabled, already running, or nothing new to import.
+    @MainActor
+    func syncRemoteHistory() {
+        let settings = AppSettings.shared
+        guard settings.remoteHistoryEnabled,
+              !settings.remoteHistoryURL.isEmpty,
+              let container = modelContainer,
+              !isSyncingRemoteHistory else { return }
+
+        isSyncingRemoteHistory = true
+        let baseURL = settings.remoteHistoryURL.trimmingCharacters(in: .init(charactersIn: "/"))
+
+        Task.detached(priority: .background) { [weak self] in
+            let (imported, error) = await Self.fetchAndImportHistory(baseURL: baseURL, container: container)
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.isSyncingRemoteHistory = false
+                if let error {
+                    self.remoteHistorySyncStatus = "Error: \(error)"
+                } else if imported > 0 {
+                    self.remoteHistorySyncStatus = "Imported \(imported) snapshot\(imported == 1 ? "" : "s")"
+                } else {
+                    self.remoteHistorySyncStatus = "Up to date"
+                }
+            }
+        }
+    }
+
+    private static func fetchAndImportHistory(baseURL: String, container: ModelContainer) async -> (imported: Int, error: String?) {
+        let context = ModelContext(container)
+
+        // Find the most recent local snapshot to use as the `since` cursor
+        var latestDescriptor = FetchDescriptor<UsageSnapshot>(
+            sortBy: [SortDescriptor(\.timestamp, order: .reverse)]
+        )
+        latestDescriptor.fetchLimit = 1
+        let lastLocal = (try? context.fetch(latestDescriptor))?.first
+
+        let since: Date
+        if let last = lastLocal {
+            since = last.timestamp
+        } else {
+            // No local history at all — pull last 7 days
+            since = Date().addingTimeInterval(-7 * 24 * 3600)
+        }
+
+        // Build request URL
+        let isoFmt = ISO8601DateFormatter()
+        isoFmt.formatOptions = [.withInternetDateTime]
+        let sinceStr = isoFmt.string(from: since)
+            .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        guard let url = URL(string: "\(baseURL)/api/usage/history?since=\(sinceStr)") else {
+            return (0, "Invalid URL: \(baseURL)")
+        }
+
+        // Fetch
+        let data: Data
+        do {
+            let (d, response) = try await URLSession.shared.data(from: url)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            guard status == 200 else { return (0, "HTTP \(status)") }
+            data = d
+        } catch {
+            return (0, error.localizedDescription)
+        }
+
+        // Parse the JSON array
+        guard let rows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            return (0, "Could not parse response")
+        }
+        guard !rows.isEmpty else { return (0, nil) }
+
+        // Load a small window of recent local snapshots for deduplication
+        // (only near the boundary — last 100 snapshots covers several hours)
+        var recentDescriptor = FetchDescriptor<UsageSnapshot>(
+            sortBy: [SortDescriptor(\.timestamp, order: .reverse)]
+        )
+        recentDescriptor.fetchLimit = 100
+        let recentLocal = (try? context.fetch(recentDescriptor)) ?? []
+
+        // Parse helpers (handles "2026-03-28T12:47:57Z" and fractional variants)
+        func parseDate(_ s: String) -> Date? {
+            let withFrac = ISO8601DateFormatter()
+            withFrac.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let d = withFrac.date(from: s) { return d }
+            let plain = ISO8601DateFormatter()
+            plain.formatOptions = [.withInternetDateTime]
+            return plain.date(from: s)
+        }
+
+        var imported = 0
+        for row in rows {
+            guard let tsStr = row["ts"] as? String,
+                  let ts = parseDate(tsStr),
+                  let pct7d = row["pct_7d"] as? Double else { continue }
+
+            let pct5h = row["pct_5h"] as? Double ?? 0.0
+
+            // Skip if a local snapshot is within 2.5 minutes (duplicate)
+            let isDuplicate = recentLocal.contains { abs($0.timestamp.timeIntervalSince(ts)) < 150 }
+            if isDuplicate { continue }
+
+            let resets5h = (row["resets_5h"] as? String).flatMap { parseDate($0) }
+            let resets7d  = (row["resets_7d"]  as? String).flatMap { parseDate($0) }
+
+            context.insert(UsageSnapshot(
+                timestamp: ts,
+                fiveHourPercent: pct5h,
+                weeklyPercent: pct7d,
+                fiveHourResetsAt: resets5h,
+                weeklyResetsAt: resets7d
+            ))
+            imported += 1
+        }
+
+        if imported > 0 {
+            try? context.save()
+        }
+        return (imported, nil)
     }
 
     // MARK: - API

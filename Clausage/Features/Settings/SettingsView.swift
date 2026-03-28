@@ -12,6 +12,7 @@ struct SettingsView: View {
                 MenuBarSettingsSection(settings: settings)
                 ColorSettingsSection(settings: settings)
                 DataSettingsSection(settings: settings, usageService: usageService)
+                RemoteHistorySection(settings: settings, usageService: usageService)
                 #if DEBUG
                 DebugSection()
                 #endif
@@ -329,6 +330,71 @@ private struct DataSettingsSection: View {
                     .frame(width: 120)
                     .onChange(of: settings.refreshInterval) { _, _ in
                         usageService.updateRefreshInterval()
+                    }
+                }
+            }
+            .padding(8)
+        }
+    }
+}
+
+private struct RemoteHistorySection: View {
+    @Bindable var settings: AppSettings
+    let usageService: UsageService
+
+    var body: some View {
+        GroupBox("History Sync") {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Fill gaps in your history chart when your Mac was asleep, using snapshots from an always-on remote source (e.g. ThinkPad).")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                Grid(alignment: .leading, verticalSpacing: 10) {
+                    GridRow {
+                        Text("Enable sync")
+                        Spacer()
+                        Toggle("", isOn: $settings.remoteHistoryEnabled)
+                            .toggleStyle(.switch)
+                            .labelsHidden()
+                    }
+                }
+
+                if settings.remoteHistoryEnabled {
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Source URL")
+                            .font(.caption.bold())
+                            .foregroundColor(.secondary)
+                        TextField("http://100.76.199.15:8199", text: $settings.remoteHistoryURL)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 12, design: .monospaced))
+                    }
+
+                    HStack {
+                        if let status = usageService.remoteHistorySyncStatus {
+                            Text(status)
+                                .font(.caption)
+                                .foregroundColor(status.hasPrefix("Error") ? .red : .secondary)
+                        } else {
+                            Text("Never synced this session")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        Button {
+                            usageService.syncRemoteHistory()
+                        } label: {
+                            if usageService.isSyncingRemoteHistory {
+                                HStack(spacing: 4) {
+                                    ProgressView().controlSize(.small)
+                                    Text("Syncing…")
+                                }
+                            } else {
+                                Text("Sync Now")
+                            }
+                        }
+                        .disabled(usageService.isSyncingRemoteHistory || settings.remoteHistoryURL.isEmpty)
                     }
                 }
             }

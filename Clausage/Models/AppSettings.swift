@@ -176,6 +176,16 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(refreshInterval, forKey: "refreshInterval") }
     }
 
+    /// Base URL of the remote history API (e.g. "http://100.76.199.15:8199")
+    var remoteHistoryURL: String {
+        didSet { UserDefaults.standard.set(remoteHistoryURL, forKey: "remoteHistoryURL") }
+    }
+
+    /// When true, clausage syncs missing history from the remote source on launch and wake.
+    var remoteHistoryEnabled: Bool {
+        didSet { UserDefaults.standard.set(remoteHistoryEnabled, forKey: "remoteHistoryEnabled") }
+    }
+
     private init() {
         let saved = UserDefaults.standard.string(forKey: "timerFormat") ?? TimerFormat.full.rawValue
         self.timerFormat = TimerFormat(rawValue: saved) ?? .full
@@ -235,5 +245,8 @@ final class AppSettings {
         } else {
             self.refreshInterval = UserDefaults.standard.double(forKey: "refreshInterval")
         }
+
+        self.remoteHistoryURL = UserDefaults.standard.string(forKey: "remoteHistoryURL") ?? ""
+        self.remoteHistoryEnabled = UserDefaults.standard.bool(forKey: "remoteHistoryEnabled")
     }
 }
