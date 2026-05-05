@@ -24,6 +24,7 @@ public class ClausageApp : ApplicationContext
     private int? _lastSecondaryValue;
     private Color _lastPrimaryColor;
     private Color _lastSecondaryColor;
+    private int _lastIconSize;
 
     public ClausageApp()
     {
@@ -90,15 +91,17 @@ public class ClausageApp : ApplicationContext
     private void UpdateIcons()
     {
         var usage = _usageService.Usage;
-        int size = _settings.IconSize;
+        int size = IconRenderer.SystemIconSize;
         string mode = _settings.DisplayMode;
+        bool sizeChanged = size != _lastIconSize;
+        _lastIconSize = size;
 
         // Primary icon
         double? pct = mode == "weekly" ? usage.WeeklyPercent : usage.FiveHourPercent;
         int? val = pct.HasValue ? (int)pct.Value : null;
         var color = IconRenderer.UsageColor(pct);
 
-        if (val != _lastPrimaryValue || color != _lastPrimaryColor)
+        if (sizeChanged || val != _lastPrimaryValue || color != _lastPrimaryColor)
         {
             var oldIcon = _primaryIcon.Icon;
             _primaryIcon.Icon = IconRenderer.RenderNumberIcon(val, color, size);
@@ -115,7 +118,7 @@ public class ClausageApp : ApplicationContext
             int? valWk = pctWk.HasValue ? (int)pctWk.Value : null;
             var colorWk = IconRenderer.UsageColor(pctWk);
 
-            if (valWk != _lastSecondaryValue || colorWk != _lastSecondaryColor)
+            if (sizeChanged || valWk != _lastSecondaryValue || colorWk != _lastSecondaryColor)
             {
                 var oldIcon = _secondaryIcon.Icon;
                 _secondaryIcon.Icon = IconRenderer.RenderNumberIcon(valWk, colorWk, size);

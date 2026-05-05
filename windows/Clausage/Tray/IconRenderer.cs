@@ -1,6 +1,8 @@
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
+using System.Runtime.InteropServices;
+using System.Windows.Forms;
 
 namespace Clausage.Tray;
 
@@ -11,6 +13,42 @@ public static class IconRenderer
     public static readonly Color ColorRed = Color.FromArgb(242, 77, 64);
     public static readonly Color ColorGray = Color.FromArgb(128, 128, 128);
 
+    private const int SM_CXSMICON = 49;
+
+    [DllImport("user32.dll")]
+    private static extern int GetSystemMetricsForDpi(int nIndex, uint dpi);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetDpiForSystem();
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr FindWindow(string lpClassName, string? lpWindowName);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetDpiForWindow(IntPtr hwnd);
+
+    /// Live tray icon size for the current DPI. Queries the actual taskbar DPI
+    /// each time so it stays correct across restarts, monitor changes, and DPI changes.
+    public static int SystemIconSize
+    {
+        get
+        {
+            try
+            {
+                // Prefer the taskbar's DPI — that's the surface our icon lands on
+                IntPtr taskbar = FindWindow("Shell_TrayWnd", null);
+                uint dpi = taskbar != IntPtr.Zero ? GetDpiForWindow(taskbar) : GetDpiForSystem();
+                if (dpi == 0) dpi = 96;
+                int size = GetSystemMetricsForDpi(SM_CXSMICON, dpi);
+                return size > 0 ? size : (int)Math.Round(16.0 * dpi / 96.0);
+            }
+            catch
+            {
+                return 16;
+            }
+        }
+    }
+
     public static Color UsageColor(double? pct)
     {
         if (pct == null) return ColorGray;
@@ -19,8 +57,10 @@ public static class IconRenderer
         return ColorRed;
     }
 
-    public static Icon RenderNumberIcon(int? value, Color color, int size = 16)
+    public static Icon RenderNumberIcon(int? value, Color color, int size = 0)
     {
+        if (size <= 0) size = SystemIconSize;
+
         using var bmp = new Bitmap(size, size);
         using var g = Graphics.FromImage(bmp);
 
@@ -36,12 +76,11 @@ public static class IconRenderer
         }
         else
         {
-            // Same font Windows 11 uses for the taskbar clock
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
 
             string text = value >= 100 ? "!" : value.ToString()!;
-            float fontSize = size <= 16 ? 12f : Math.Max(10f, size * 0.72f);
+            float fontSize = Math.Max(10f, size * 0.75f);
 
             using var font = CreateFont(fontSize);
             using var brush = new SolidBrush(color);
@@ -58,7 +97,6 @@ public static class IconRenderer
 
     private static Font CreateFont(float size)
     {
-        // Windows 11 taskbar clock font, then fallbacks
         foreach (var name in new[] { "Segoe UI Variable", "Segoe UI" })
         {
             try
