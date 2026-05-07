@@ -3,12 +3,15 @@ import SwiftData
 
 struct SettingsView: View {
     let usageService: UsageService
+    let codexUsageService: CodexUsageService
     let updateService: UpdateService
     @Bindable private var settings = AppSettings.shared
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
+                AccountSection(usageService: usageService)
+                CodexAccountSection(settings: settings, codexUsageService: codexUsageService)
                 MenuBarSettingsSection(settings: settings)
                 ColorSettingsSection(settings: settings)
                 DataSettingsSection(settings: settings, usageService: usageService)
@@ -21,6 +24,199 @@ struct SettingsView: View {
             .padding(24)
         }
         .navigationTitle("Settings")
+    }
+}
+
+private struct CodexAccountSection: View {
+    @Bindable var settings: AppSettings
+    let codexUsageService: CodexUsageService
+    @State private var probeStatus: String?
+
+    var body: some View {
+        GroupBox("OpenAI Codex") {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Toggle("Show Codex usage on Dashboard", isOn: $settings.showCodexUsage)
+                        .toggleStyle(.switch)
+                    Spacer()
+                }
+                Text("Reads `~/.codex/auth.json` (managed by the Codex CLI). Clausage does not log you in to OpenAI itself — run `codex login` in a terminal if you haven't already.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                Divider()
+
+                statusRow
+
+                HStack {
+                    Spacer()
+                    Button("Refresh") {
+                        codexUsageService.fetch()
+                    }
+                    .disabled(codexUsageService.isLoading)
+                }
+            }
+            .padding(8)
+        }
+    }
+
+    @ViewBuilder
+    private var statusRow: some View {
+        switch CodexAuthService.load() {
+        case .success(let creds):
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Codex credentials found")
+                        .font(.subheadline.bold())
+                    Text("Plan: \(creds.planType ?? "unknown") • Account \(creds.accountId.prefix(8))…")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+            }
+        case .failure(let err):
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundColor(.orange)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Codex unavailable")
+                        .font(.subheadline.bold())
+                    Text(err.errorDescription ?? "Unknown error")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+            }
+        }
+    }
+}
+
+private struct AccountSection: View {
+    let usageService: UsageService
+    @Bindable private var auth = AuthService.shared
+    @State private var inFlight = false
+    @State private var lastError: String?
+
+    var body: some View {
+        GroupBox("Account") {
+            VStack(alignment: .leading, spacing: 12) {
+                statusRow
+                Divider()
+                Text("Clausage stores its own OAuth tokens in `~/Library/Application Support/Clausage/oauth.json` and refreshes them on its own — no keychain prompts, no dependency on Claude Code being signed in.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                actionRow
+                if let err = lastError {
+                    Text(err)
+                        .font(.caption)
+                        .foregroundColor(.red)
+                }
+            }
+            .padding(8)
+        }
+    }
+
+    @ViewBuilder
+    private var statusRow: some View {
+        HStack(spacing: 10) {
+            switch auth.state {
+            case .signedIn(let source):
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundColor(.green)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Signed in to Anthropic")
+                        .font(.subheadline.bold())
+                    Text(sourceCaption(source))
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            case .signedOut:
+                Image(systemName: "person.crop.circle.badge.exclamationmark")
+                    .foregroundColor(.orange)
+                Text("Not signed in")
+                    .font(.subheadline.bold())
+            case .signingIn:
+                ProgressView().controlSize(.small)
+                Text("Signing in… check your browser")
+                    .font(.subheadline)
+            case .error(let msg):
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundColor(.red)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Sign-in error")
+                        .font(.subheadline.bold())
+                    Text(msg).font(.caption).foregroundColor(.secondary)
+                }
+            case .unknown:
+                ProgressView().controlSize(.small)
+                Text("Checking credentials…")
+                    .font(.subheadline)
+            }
+            Spacer()
+        }
+    }
+
+    @ViewBuilder
+    private var actionRow: some View {
+        HStack {
+            switch auth.state {
+            case .signedIn:
+                Button("Sign out", role: .destructive) {
+                    auth.signOut()
+                    usageService.fetch()
+                }
+                Spacer()
+                Button("Re-sign in (browser)") {
+                    Task { await runSignIn() }
+                }
+                .disabled(inFlight)
+            case .signedOut, .error:
+                Button {
+                    Task { await runSignIn() }
+                } label: {
+                    Label("Sign in with Anthropic", systemImage: "globe")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(inFlight)
+
+                Spacer()
+
+                Button("Import from Claude Code") {
+                    if auth.bootstrapFromClaudeCodeIfPossible() != nil {
+                        lastError = nil
+                        usageService.fetch()
+                    } else {
+                        lastError = "No Claude Code credentials found in your keychain."
+                    }
+                }
+            case .signingIn:
+                Button("Cancel") { /* no-op; closing browser tab effectively cancels */ }
+                    .disabled(true)
+                Spacer()
+            case .unknown:
+                Spacer()
+            }
+        }
+    }
+
+    private func runSignIn() async {
+        inFlight = true
+        lastError = nil
+        do {
+            try await auth.signInWithBrowser()
+            usageService.fetch()
+        } catch {
+            lastError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+        inFlight = false
+    }
+
+    private func sourceCaption(_ source: StoredCredentials.Source) -> String {
+        switch source {
+        case .browser: return "Authenticated via Clausage's own OAuth flow."
+        case .claudeCodeImport: return "Bootstrapped from Claude Code's keychain. Re-sign in via browser anytime to make Clausage fully independent."
+        }
     }
 }
 

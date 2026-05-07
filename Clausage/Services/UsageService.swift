@@ -276,8 +276,8 @@ final class UsageService {
     // MARK: - API
 
     private static func fetchUsage() -> UsageData {
-        guard let token = KeychainService.getAccessToken() else {
-            return UsageData(error: "No Claude Code credentials found. Open Claude Code and log in first.")
+        guard let token = AuthService.getAccessToken() else {
+            return UsageData(error: "Not signed in. Open Settings and sign in to Anthropic.")
         }
 
         guard let url = URL(string: "https://api.anthropic.com/api/oauth/usage") else {
@@ -312,8 +312,8 @@ final class UsageService {
         }
 
         if httpStatusCode == 401 {
-            guard let freshToken = KeychainService.refreshToken() else {
-                return UsageData(error: "Authentication failed. Re-login to Claude Code.")
+            guard let freshToken = AuthService.refreshToken() else {
+                return UsageData(error: "Authentication failed. Open Settings and sign in again.")
             }
             request.setValue("Bearer \(freshToken)", forHTTPHeaderField: "Authorization")
 
@@ -338,7 +338,7 @@ final class UsageService {
 
         if httpStatusCode == 429 {
             // Token may have been rotated — try a fresh one before giving up
-            if let freshToken = KeychainService.refreshToken() {
+            if let freshToken = AuthService.refreshToken() {
                 request.setValue("Bearer \(freshToken)", forHTTPHeaderField: "Authorization")
 
                 let retrySemaphore = DispatchSemaphore(value: 0)

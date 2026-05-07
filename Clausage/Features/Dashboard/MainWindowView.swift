@@ -20,6 +20,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
 
 struct MainWindowView: View {
     let usageService: UsageService
+    let codexUsageService: CodexUsageService
     let updateService: UpdateService
     let pricingService: PlanPricingService
     let appState: AppState
@@ -36,13 +37,21 @@ struct MainWindowView: View {
         } detail: {
             switch selectedItem {
             case .dashboard:
-                DashboardView(usageService: usageService, appState: appState)
+                DashboardView(
+                    usageService: usageService,
+                    codexUsageService: codexUsageService,
+                    appState: appState
+                )
             case .history:
                 HistoryView()
             case .planOptimizer:
                 PlanOptimizerView(pricingService: pricingService)
             case .settings:
-                SettingsView(usageService: usageService, updateService: updateService)
+                SettingsView(
+                    usageService: usageService,
+                    codexUsageService: codexUsageService,
+                    updateService: updateService
+                )
             }
         }
     }
