@@ -17,10 +17,15 @@ enum CredentialStore {
     private static let fileName = "oauth.json"
     private static let folderName = "Clausage"
 
+    /// Override URL used by tests to redirect storage to a temp directory. When
+    /// set, `load()` / `save()` / `delete()` / `exists()` all operate on this URL
+    /// instead of the real Application Support path. Production code never sets this.
+    nonisolated(unsafe) static var overrideURL: URL?
+
     // MARK: - Public API
 
     static func load() -> StoredCredentials? {
-        guard let url = fileURL(),
+        guard let url = effectiveURL(),
               FileManager.default.fileExists(atPath: url.path),
               let data = try? Data(contentsOf: url),
               let decoded = try? JSONDecoder.iso8601.decode(StoredCredentials.self, from: data)
@@ -31,7 +36,7 @@ enum CredentialStore {
     }
 
     static func save(_ credentials: StoredCredentials) throws {
-        guard let url = fileURL() else {
+        guard let url = effectiveURL() else {
             throw CredentialStoreError.locationUnavailable
         }
         try ensureDirectory(at: url.deletingLastPathComponent())
@@ -42,18 +47,23 @@ enum CredentialStore {
     }
 
     static func delete() {
-        guard let url = fileURL() else { return }
+        guard let url = effectiveURL() else { return }
         try? FileManager.default.removeItem(at: url)
     }
 
     static func exists() -> Bool {
-        guard let url = fileURL() else { return false }
+        guard let url = effectiveURL() else { return false }
         return FileManager.default.fileExists(atPath: url.path)
     }
 
     // MARK: - Internal
 
-    private static func fileURL() -> URL? {
+    private static func effectiveURL() -> URL? {
+        if let override = overrideURL { return override }
+        return defaultURL()
+    }
+
+    private static func defaultURL() -> URL? {
         guard let base = FileManager.default.urls(
             for: .applicationSupportDirectory,
             in: .userDomainMask

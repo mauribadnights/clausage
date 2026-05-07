@@ -140,8 +140,13 @@ Clausage/
 │   ├── PlanOptimizer/      # Per-plan projections & insights
 │   └── Settings/           # Preferences + debug tools
 ├── Services/
-│   ├── KeychainService     # OAuth token with caching
-│   ├── UsageService        # Anthropic API client + persistence
+│   ├── AuthService         # Browser OAuth + file-based token store (replaces KeychainService)
+│   ├── CredentialStore     # ~/Library/Application Support/Clausage/oauth.json (mode 0600)
+│   ├── PKCE                # PKCE verifier/challenge generator
+│   ├── LocalCallbackServer # 127.0.0.1 ephemeral HTTP listener for OAuth redirect
+│   ├── UsageService        # Anthropic /api/oauth/usage client + persistence
+│   ├── CodexAuthService    # Reads ~/.codex/auth.json (managed by Codex CLI)
+│   ├── CodexUsageService   # ChatGPT /backend-api/codex/usage client
 │   ├── UpdateService       # GitHub release auto-updater
 │   ├── PlanPricingService  # Pricing data + projection engine
 │   └── MockDataSeeder      # Debug: seed test data
@@ -161,7 +166,7 @@ Clausage/
 swift test
 ```
 
-86 tests covering promo schedule, timer formatting, version comparison, plan projections, peak-at-reset detection, usage data, and SwiftData persistence.
+113 tests covering promo schedule, timer formatting, version comparison, plan projections, peak-at-reset detection, usage data, SwiftData persistence, OAuth PKCE generation, credential store round-trips, OAuth callback server, Codex auth file parsing, and Codex usage response parsing.
 
 ### Debug Mode
 

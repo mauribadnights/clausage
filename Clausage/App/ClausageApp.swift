@@ -5,6 +5,7 @@ import SwiftData
 struct ClausageApp: App {
     @State private var appState = AppState()
     @State private var usageService = UsageService()
+    @State private var codexUsageService = CodexUsageService()
     @State private var updateService = UpdateService()
     @State private var pricingService = PlanPricingService()
 
@@ -38,6 +39,7 @@ struct ClausageApp: App {
         Window("Clausage", id: "main") {
             MainWindowView(
                 usageService: usageService,
+                codexUsageService: codexUsageService,
                 updateService: updateService,
                 pricingService: pricingService,
                 appState: appState

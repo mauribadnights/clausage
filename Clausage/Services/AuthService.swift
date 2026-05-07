@@ -342,7 +342,8 @@ final class AuthService {
 // MARK: - Constants
 
 private enum AuthConstants {
-    static let authorizeEndpoint = "https://claude.com/cai/oauth/authorize"
+    /// `claude.com/cai/oauth/authorize` 307-redirects here; we bypass the hop.
+    static let authorizeEndpoint = "https://claude.ai/oauth/authorize"
     static let tokenEndpoint     = "https://platform.claude.com/v1/oauth/token"
     /// Public client metadata URL — used as `client_id` per Anthropic's dynamic-registration
     /// scheme for the Claude Code OAuth client. The Authorization Code flow expects this URL.

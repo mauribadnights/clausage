@@ -3,6 +3,7 @@ import SwiftData
 
 struct SettingsView: View {
     let usageService: UsageService
+    let codexUsageService: CodexUsageService
     let updateService: UpdateService
     @Bindable private var settings = AppSettings.shared
 
@@ -10,6 +11,7 @@ struct SettingsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 AccountSection(usageService: usageService)
+                CodexAccountSection(settings: settings, codexUsageService: codexUsageService)
                 MenuBarSettingsSection(settings: settings)
                 ColorSettingsSection(settings: settings)
                 DataSettingsSection(settings: settings, usageService: usageService)
@@ -22,6 +24,71 @@ struct SettingsView: View {
             .padding(24)
         }
         .navigationTitle("Settings")
+    }
+}
+
+private struct CodexAccountSection: View {
+    @Bindable var settings: AppSettings
+    let codexUsageService: CodexUsageService
+    @State private var probeStatus: String?
+
+    var body: some View {
+        GroupBox("OpenAI Codex") {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Toggle("Show Codex usage on Dashboard", isOn: $settings.showCodexUsage)
+                        .toggleStyle(.switch)
+                    Spacer()
+                }
+                Text("Reads `~/.codex/auth.json` (managed by the Codex CLI). Clausage does not log you in to OpenAI itself — run `codex login` in a terminal if you haven't already.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                Divider()
+
+                statusRow
+
+                HStack {
+                    Spacer()
+                    Button("Refresh") {
+                        codexUsageService.fetch()
+                    }
+                    .disabled(codexUsageService.isLoading)
+                }
+            }
+            .padding(8)
+        }
+    }
+
+    @ViewBuilder
+    private var statusRow: some View {
+        switch CodexAuthService.load() {
+        case .success(let creds):
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Codex credentials found")
+                        .font(.subheadline.bold())
+                    Text("Plan: \(creds.planType ?? "unknown") • Account \(creds.accountId.prefix(8))…")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+            }
+        case .failure(let err):
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundColor(.orange)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Codex unavailable")
+                        .font(.subheadline.bold())
+                    Text(err.errorDescription ?? "Unknown error")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+            }
+        }
     }
 }
 

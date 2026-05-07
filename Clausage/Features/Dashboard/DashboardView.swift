@@ -3,8 +3,10 @@ import SwiftData
 
 struct DashboardView: View {
     let usageService: UsageService
+    let codexUsageService: CodexUsageService
     let appState: AppState
     @Query(sort: \UsageSnapshot.timestamp, order: .forward) private var snapshots: [UsageSnapshot]
+    @Bindable private var settings = AppSettings.shared
 
     var body: some View {
         ScrollView {
@@ -16,20 +18,35 @@ struct DashboardView: View {
                     Spacer()
                 }
 
-                // Current usage cards
-                HStack(spacing: 16) {
-                    UsageCard(
-                        title: "5-Hour Usage",
-                        percent: usageService.usage.fiveHourPercent,
-                        resetsAt: usageService.usage.fiveHourResetsAt,
-                        icon: "clock"
-                    )
-                    UsageCard(
-                        title: "Weekly Usage",
-                        percent: usageService.usage.weeklyPercent,
-                        resetsAt: usageService.usage.weeklyResetsAt,
-                        icon: "calendar"
-                    )
+                // Anthropic Claude usage cards
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "sparkles")
+                            .foregroundColor(.accentColor)
+                        Text("Claude")
+                            .font(.subheadline.bold())
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
+                    HStack(spacing: 16) {
+                        UsageCard(
+                            title: "5-Hour Usage",
+                            percent: usageService.usage.fiveHourPercent,
+                            resetsAt: usageService.usage.fiveHourResetsAt,
+                            icon: "clock"
+                        )
+                        UsageCard(
+                            title: "Weekly Usage",
+                            percent: usageService.usage.weeklyPercent,
+                            resetsAt: usageService.usage.weeklyResetsAt,
+                            icon: "calendar"
+                        )
+                    }
+                }
+
+                // OpenAI Codex usage cards
+                if settings.showCodexUsage {
+                    CodexUsageSection(service: codexUsageService)
                 }
 
                 // Burn window card
@@ -346,5 +363,96 @@ struct PromoCard: View {
         case .notStarted: return .blue
         case .ended, .disabled: return .gray
         }
+    }
+}
+
+// MARK: - Codex usage
+
+struct CodexUsageSection: View {
+    let service: CodexUsageService
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "terminal")
+                    .foregroundColor(.green)
+                Text("OpenAI Codex")
+                    .font(.subheadline.bold())
+                    .foregroundColor(.secondary)
+                if let plan = service.usage.planType {
+                    Text(planBadge(plan))
+                        .font(.caption2.bold())
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.green.opacity(0.15))
+                        .clipShape(Capsule())
+                        .foregroundColor(.green)
+                }
+                Spacer()
+                Button {
+                    service.fetch()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.caption)
+                }
+                .buttonStyle(.plain)
+                .disabled(service.isLoading)
+            }
+
+            if let error = service.usage.error,
+               service.usage.primaryUsedPercent == nil,
+               service.usage.secondaryUsedPercent == nil {
+                // Initial-error state — no data ever fetched.
+                HStack(spacing: 8) {
+                    Image(systemName: "info.circle")
+                        .foregroundColor(.secondary)
+                    Text(error)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.quaternary.opacity(0.5))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            } else {
+                HStack(spacing: 16) {
+                    UsageCard(
+                        title: "5-Hour Usage",
+                        percent: service.usage.primaryUsedPercent,
+                        resetsAt: service.usage.primaryResetsAt,
+                        icon: "clock"
+                    )
+                    UsageCard(
+                        title: weeklyTitle(forWindowSeconds: service.usage.secondaryWindowSeconds),
+                        percent: service.usage.secondaryUsedPercent,
+                        resetsAt: service.usage.secondaryResetsAt,
+                        icon: "calendar"
+                    )
+                }
+                if service.usage.isStale, let err = service.usage.error {
+                    Text("Last refresh failed: \(err)")
+                        .font(.caption2)
+                        .foregroundColor(.orange)
+                }
+            }
+        }
+    }
+
+    private func planBadge(_ plan: String) -> String {
+        switch plan.lowercased() {
+        case "pro":     return "PRO"
+        case "prolite": return "PRO LITE"
+        case "plus":    return "PLUS"
+        case "free":    return "FREE"
+        default:        return plan.uppercased()
+        }
+    }
+
+    private func weeklyTitle(forWindowSeconds seconds: Int?) -> String {
+        guard let seconds = seconds else { return "Weekly Usage" }
+        if seconds >= 6 * 86400 { return "Weekly Usage" }
+        if seconds >= 23 * 3600 { return "Daily Usage" }
+        return "Window \(seconds / 3600)h"
     }
 }

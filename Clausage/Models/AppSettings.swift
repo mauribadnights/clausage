@@ -186,6 +186,13 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(remoteHistoryEnabled, forKey: "remoteHistoryEnabled") }
     }
 
+    /// Show OpenAI Codex usage card on the dashboard. Reads `~/.codex/auth.json`
+    /// and queries `chatgpt.com/api/codex/usage`. May be unavailable if Cloudflare
+    /// blocks the call from this client; the card surfaces a clear error in that case.
+    var showCodexUsage: Bool {
+        didSet { UserDefaults.standard.set(showCodexUsage, forKey: "showCodexUsage") }
+    }
+
     private init() {
         let saved = UserDefaults.standard.string(forKey: "timerFormat") ?? TimerFormat.full.rawValue
         self.timerFormat = TimerFormat(rawValue: saved) ?? .full
@@ -248,5 +255,11 @@ final class AppSettings {
 
         self.remoteHistoryURL = UserDefaults.standard.string(forKey: "remoteHistoryURL") ?? ""
         self.remoteHistoryEnabled = UserDefaults.standard.bool(forKey: "remoteHistoryEnabled")
+
+        if UserDefaults.standard.object(forKey: "showCodexUsage") == nil {
+            self.showCodexUsage = true   // default on; the card hides cleanly if unavailable
+        } else {
+            self.showCodexUsage = UserDefaults.standard.bool(forKey: "showCodexUsage")
+        }
     }
 }
